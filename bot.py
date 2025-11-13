@@ -10,7 +10,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 
 from config import config
-from database import init_db, close_db
+from database import init_db, close_db, get_session  # get_session YANGI
 from middleware.db import DatabaseMiddleware
 from handlers import user, admin, stats, broadcast
 from scheduler.tasks import SchedulerTasks
@@ -30,119 +30,120 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
 
-# Agar local Bot API server ishlatmoqchi bo'lsangiz:
-# from aiogram.client.session.aiohttp import AiohttpSession
-# session = AiohttpSession(api=config.BOT_API_SERVER)
-# bot = Bot(token=config.BOT_TOKEN, session=session, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-
 dp = Dispatcher()
-
 scheduler = AsyncIOScheduler(timezone=config.TIMEZONE)
 
+# SchedulerTasks instansi
+scheduler_tasks = SchedulerTasks(bot)
+
+# ============== WRAPPER FUNKSİYALAR (session yaratadi) ==============
+async def check_launch_users_wrapper():
+    async with get_session() as session:
+        await scheduler_tasks.check_launch_users(session)
+
+async def send_scheduled_posts_wrapper():
+    async with get_session() as session:
+        await scheduler_tasks.send_scheduled_posts(session)
+
+async def update_user_days_wrapper():
+    async with get_session() as session:
+        await scheduler_tasks.update_user_days(session)
+
+async def cleanup_old_progress_wrapper():
+    async with get_session() as session:
+        await scheduler_tasks.cleanup_old_progress(session)
+
+# ============== ON STARTUP ==============
 async def on_startup():
     try:
         config.validate()
-        logger.info("✅ Configuration validated")
-        logger.info(f"🌍 Timezone: {config.TIMEZONE}")
+        logger.info("Configuration validated")
+        logger.info(f"Timezone: {config.TIMEZONE}")
     except ValueError as e:
-        logger.error(f"❌ Configuration error: {e}")
+        logger.error(f"Configuration error: {e}")
         sys.exit(1)
 
     try:
         await init_db()
-        logger.info("✅ Database initialized")
+        logger.info("Database initialized")
     except Exception as e:
-        logger.error(f"❌ Database initialization error: {e}")
+        logger.error(f"Database initialization error: {e}")
         sys.exit(1)
-    
-    scheduler_tasks = SchedulerTasks(bot)
-    
+
+    # Scheduler joblarni qo‘shish (wrapper orqali)
     scheduler.add_job(
-        scheduler_tasks.send_scheduled_posts,
+        check_launch_users_wrapper,
+        trigger=IntervalTrigger(seconds=30),
+        id='check_launch_users',
+        replace_existing=True
+    )
+
+    scheduler.add_job(
+        send_scheduled_posts_wrapper,
         trigger=IntervalTrigger(minutes=1),
         id='send_scheduled_posts',
-        name='Send scheduled posts',
         replace_existing=True
     )
 
     scheduler.add_job(
-        scheduler_tasks.update_user_days,
+        update_user_days_wrapper,
         trigger=CronTrigger(hour=0, minute=5, timezone=config.TIMEZONE),
         id='update_user_days',
-        name='Update user days daily',
         replace_existing=True
     )
 
     scheduler.add_job(
-        scheduler_tasks.cleanup_old_progress,
+        cleanup_old_progress_wrapper,
         trigger=CronTrigger(hour=3, minute=0, timezone=config.TIMEZONE),
         id='cleanup_old_progress',
-        name='Cleanup old progress',
         replace_existing=True
     )
-    
+
     scheduler.start()
-    logger.info("✅ Scheduler started")
-    
+    logger.info("Scheduler started")
+
+    # Adminlarga xabar
     for admin_id in config.ADMIN_IDS:
         try:
             await bot.send_message(
                 admin_id,
-                "🤖 <b>Бот успешно запущен!</b>\n\n"
-                f"⏰ Scheduler активен\n"
-                f"🗄 База данных подключена\n"
-                f"🌍 Часовой пояс: {config.TIMEZONE}\n"
-                f"✅ Все системы работают",
+                "Bot успешно запущен!\n\n"
+                "Scheduler активен\n"
+                "База данных подключена\n"
+                f"Часовой пояс: {config.TIMEZONE}\n"
+                "Все системы работают",
                 parse_mode="HTML"
             )
         except Exception as e:
-            logger.warning(f"Failed to send startup message to admin {admin_id}: {e}")
-    
-    logger.info("✅ Bot started successfully!")
+            logger.warning(f"Failed to notify admin {admin_id}: {e}")
 
+    logger.info("Bot started!")
+
+# ============== ON SHUTDOWN ==============
 async def on_shutdown():
-    """Bot to'xtaganda"""
-    logger.info("🛑 Shutting down bot...")
-    
-    # Scheduler to'xtatish
+    logger.info("Shutting down...")
     scheduler.shutdown()
-    logger.info("✅ Scheduler stopped")
-    
-    # Database yopish
     await close_db()
-    logger.info("✅ Database connection closed")
-    
-    # Adminlarga xabar yuborish
     for admin_id in config.ADMIN_IDS:
         try:
-            await bot.send_message(
-                admin_id,
-                "🛑 <b>Бот остановлен</b>",
-                parse_mode="HTML"
-            )
+            await bot.send_message(admin_id, "Bot остановлен", parse_mode="HTML")
         except:
             pass
-    
-    logger.info("✅ Bot stopped successfully!")
+    logger.info("Bot stopped!")
 
+# ============== MAIN ==============
 async def main():
-    """Asosiy funksiya"""
-    
-    # Middleware ulash
     dp.message.middleware(DatabaseMiddleware())
     dp.callback_query.middleware(DatabaseMiddleware())
-    
-    # Handlerlarni ro'yxatdan o'tkazish
+
     dp.include_router(user.router)
     dp.include_router(admin.router)
     dp.include_router(stats.router)
     dp.include_router(broadcast.router)
-    
-    # Startup va Shutdown
+
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
-    
-    # Botni ishga tushirish
+
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:

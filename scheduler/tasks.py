@@ -1,314 +1,320 @@
+# scheduler/tasks.py
 import asyncio
-import logging
-from datetime import datetime, timedelta
-from typing import List
-import pytz
+from datetime import datetime
 from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_, text
+from database.base import User, SchedulePost, UserProgress, ScheduleDay
+from utils.helpers import format_moscow_time
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from database import async_session_maker
-from database.base import User, SchedulePost, UserProgress
-from config import config
-from utils.helpers import check_subscription
-
-logger = logging.getLogger(__name__)
 
 class SchedulerTasks:
     def __init__(self, bot: Bot):
         self.bot = bot
-        self.timezone = pytz.timezone(config.TIMEZONE)
-    
-    async def send_scheduled_posts(self):
-        """Rejalashtirilgan postlarni yuborish"""
-        logger.info("🔄 Checking for scheduled posts...")
-        
-        async with async_session_maker() as session:
-            try:
-                # Hozirgi vaqt (timezone bilan)
-                now = datetime.now(self.timezone)
-                current_time = now.strftime("%H:%M")
-                current_date = now.date()
-                
-                logger.info(f"⏰ Current time: {current_time}, Date: {current_date}")
-                
-                # 1. Barcha aktiv userlarni olish
-                users_result = await session.execute(
-                    select(User).where(
-                        and_(
-                            User.is_blocked == False,
-                            User.is_active == True
-                        )
-                    )
-                )
-                users = users_result.scalars().all()
-                
-                logger.info(f"👥 Found {len(users)} active users")
-                
-                if not users:
-                    logger.info("✅ No active users")
-                    return
-                
-                sent_count = 0
-                failed_count = 0
-                
-                # 2. Har bir user uchun postlarni tekshirish
-                for user in users:
-                    # ✅ MUHIM: Aynan hozirgi daqiqadagi postlarni olish
-                    # Masalan: 02:58 bo'lsa, faqat 02:58 uchun postlarni yuborish
-                    posts_result = await session.execute(
-                        select(SchedulePost).where(
-                            and_(
-                                SchedulePost.day_number == user.current_day,
-                                SchedulePost.time == current_time  # ✅ Faqat aynan hozirgi vaqt
-                            )
-                        ).order_by(SchedulePost.order_number)
-                    )
-                    posts = posts_result.scalars().all()
-                    
-                    if not posts:
-                        continue
-                    
-                    logger.info(f"📬 User {user.user_id}: Day {user.current_day}, Found {len(posts)} posts for {current_time}")
-                    
-                    for post in posts:
-                        # Bugun allaqachon yuborilganligini tekshirish
-                        check_result = await session.execute(
-                            select(UserProgress).where(
-                                and_(
-                                    UserProgress.user_id == user.user_id,
-                                    UserProgress.post_id == post.post_id,
-                                    func.date(UserProgress.sent_date) == current_date
-                                )
-                            )
-                        )
-                        already_sent = check_result.scalar_one_or_none()
-                        
-                        if already_sent:
-                            logger.info(f"⏭️ Post {post.post_id} already sent to user {user.user_id} today")
-                            continue
-                        
-                        # Obunani qayta tekshirish
-                        is_subscribed = await check_subscription(self.bot, user.user_id)
-                        
-                        if not is_subscribed:
-                            logger.warning(f"⚠️ User {user.user_id} is not subscribed")
-                            await self.send_unsubscribed_warning(user.user_id)
-                            user.is_subscribed = False
-                            await session.commit()
-                            break  # Bu userga boshqa postlar yuborilmaydi
-                        
-                        # Postni yuborish
-                        logger.info(f"📤 Sending post {post.post_id} ({post.post_type}) to user {user.user_id}")
-                        success = await self.send_post(user.user_id, post)
-                        
-                        if success:
-                            # Yuborilganini belgilash
-                            progress = UserProgress(
-                                user_id=user.user_id,
-                                post_id=post.post_id,
-                                status='sent'
-                            )
-                            session.add(progress)
-                            await session.commit()
-                            sent_count += 1
-                            logger.info(f"✅ Post {post.post_id} sent successfully to user {user.user_id}")
-                        else:
-                            failed_count += 1
-                            logger.error(f"❌ Failed to send post {post.post_id} to user {user.user_id}")
-                        
-                        # Anti-flood
-                        await asyncio.sleep(0.05)
-                
-                logger.info(f"✅ Scheduler finished: Sent: {sent_count}, Failed: {failed_count}")
-                
-            except Exception as e:
-                logger.error(f"❌ Error in send_scheduled_posts: {e}", exc_info=True)
-                await session.rollback()
-    
-    async def send_post(self, user_id: int, post: SchedulePost) -> bool:
-        """Postni yuborish"""
+
+    async def _send_post(self, bot: Bot, user_id: int, post: SchedulePost):
+        """Bitta postni yuborish"""
         try:
+            # Media turlariga file_id kerak
+            media_types = ['photo', 'video', 'video_note', 'audio', 'document', 'voice']
+            
+            if post.post_type in media_types and not post.file_id:
+                print(f"⚠️ Warning: Post {post.post_id} (type: {post.post_type}) has no file_id - skipping")
+                return False
+            
             if post.post_type == 'text':
-                await self.bot.send_message(
-                    chat_id=user_id,
-                    text=post.content,
-                    parse_mode="HTML"
-                )
+                if not post.content:
+                    print(f"⚠️ Warning: Post {post.post_id} (type: text) has no content - skipping")
+                    return False
+                await bot.send_message(user_id, post.content, parse_mode="HTML")
             
             elif post.post_type == 'photo':
-                await self.bot.send_photo(
-                    chat_id=user_id,
-                    photo=post.file_id,
-                    caption=post.caption,
-                    parse_mode="HTML"
-                )
+                await bot.send_photo(user_id, post.file_id, caption=post.caption or "", parse_mode="HTML")
             
             elif post.post_type == 'video':
-                await self.bot.send_video(
-                    chat_id=user_id,
-                    video=post.file_id,
-                    caption=post.caption,
-                    parse_mode="HTML"
-                )
+                await bot.send_video(user_id, post.file_id, caption=post.caption or "", parse_mode="HTML")
             
             elif post.post_type == 'video_note':
-                await self.bot.send_video_note(
-                    chat_id=user_id,
-                    video_note=post.file_id
-                )
+                await bot.send_video_note(user_id, post.file_id)
             
             elif post.post_type == 'audio':
-                await self.bot.send_audio(
-                    chat_id=user_id,
-                    audio=post.file_id,
-                    caption=post.caption,
-                    parse_mode="HTML"
-                )
+                await bot.send_audio(user_id, post.file_id, caption=post.caption or "", parse_mode="HTML")
             
             elif post.post_type == 'document':
-                await self.bot.send_document(
-                    chat_id=user_id,
-                    document=post.file_id,
-                    caption=post.caption,
-                    parse_mode="HTML"
-                )
+                await bot.send_document(user_id, post.file_id, caption=post.caption or "", parse_mode="HTML")
             
             elif post.post_type == 'voice':
-                await self.bot.send_voice(
-                    chat_id=user_id,
-                    voice=post.file_id,
-                    caption=post.caption,
-                    parse_mode="HTML"
-                )
+                await bot.send_voice(user_id, post.file_id, caption=post.caption or "", parse_mode="HTML")
             
             elif post.post_type == 'link':
-                buttons = post.buttons
-                keyboard = InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [InlineKeyboardButton(
-                            text=buttons['inline'][0][0]['text'],
-                            url=buttons['inline'][0][0]['url']
-                        )]
-                    ]
-                )
-                await self.bot.send_message(
-                    chat_id=user_id,
-                    text=post.content,
-                    reply_markup=keyboard,
-                    parse_mode="HTML"
-                )
+                if not post.content:
+                    print(f"⚠️ Warning: Post {post.post_id} (type: link) has no content - skipping")
+                    return False
+                    
+                if post.buttons and 'inline' in post.buttons:
+                    kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text=b[0]['text'], url=b[0]['url']) 
+                        for b in post.buttons['inline']]
+                    ])
+                    await bot.send_message(user_id, post.content, reply_markup=kb, parse_mode="HTML")
+                else:
+                    await bot.send_message(user_id, post.content, parse_mode="HTML")
+            
+            elif post.post_type == 'subscription_check':
+                # Obuna tekshirish uchun maxsus post turi
+                if not post.content:
+                    print(f"⚠️ Warning: Post {post.post_id} (type: subscription_check) has no content - skipping")
+                    return False
+                    
+                if post.buttons and 'inline' in post.buttons:
+                    kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text=b[0]['text'], url=b[0]['url']) 
+                        for b in post.buttons['inline']]
+                    ])
+                    await bot.send_message(user_id, post.content, reply_markup=kb, parse_mode="HTML")
+                else:
+                    await bot.send_message(user_id, post.content, parse_mode="HTML")
+            
+            else:
+                print(f"⚠️ Unknown post type: {post.post_type} for post {post.post_id}")
+                return False
             
             return True
+                
+        except Exception as e:
+            print(f"❌ Failed to send post {post.post_id} to {user_id}: {e}")
+            return False
+
+    async def send_launch_sequence(self, bot: Bot, session: AsyncSession, user: User):
+        """
+        Day 0 postlarni ketma-ket yuborish
+        User /start bosganda ishga tushadi
+        """
+        if user.first_message_sent:
+            return
+
+        # Day 0 postlarni tartib bo'yicha olish
+        posts = await session.execute(
+            select(SchedulePost)
+            .where(SchedulePost.day_number == 0)
+            .order_by(SchedulePost.order_number)
+        )
+        posts = posts.scalars().all()
+
+        if not posts:
+            print(f"⚠️ No posts found for day 0")
+            return
+
+        # User uchun first_message_sent ni True qilish
+        user.first_message_sent = True
+        await session.commit()
+
+        print(f"📤 Starting launch sequence for user {user.user_id}")
+
+        for i, post in enumerate(posts):
+            # Birinchi postdan boshqa barcha postlar uchun delay
+            if i > 0:
+                delay = post.delay_seconds or 0
+                if delay > 0:
+                    print(f"⏳ Waiting {delay} seconds before sending post {post.post_id}")
+                    await asyncio.sleep(delay)
+
+            # Postni yuborish
+            success = await self._send_post(bot, user.user_id, post)
             
-        except TelegramForbiddenError:
-            # User botni bloklagan
-            logger.warning(f"⛔ User {user_id} blocked the bot")
-            await self.mark_user_blocked(user_id)
-            return False
+            if success:
+                # Progress yozish
+                session.add(UserProgress(
+                    user_id=user.user_id, 
+                    post_id=post.post_id, 
+                    status="sent"
+                ))
+                print(f"✅ Post {post.post_id} sent to user {user.user_id}")
+
+            # Agar subscription_check post bo'lsa, to'xtatish
+            if post.post_type == "subscription_check":
+                user.subscription_checked = True
+                await session.commit()
+                print(f"🛑 Stopped at subscription check for user {user.user_id}")
+                break
+
+        await session.commit()
+
+    async def send_remaining_launch_posts(self, bot: Bot, session: AsyncSession, user: User):
+        """
+        Obuna tasdiqlangandan keyin qolgan Day 0 postlarni yuborish
+        """
+        if not user.subscription_checked:
+            print(f"⚠️ User {user.user_id} subscription not checked yet")
+            return
+
+        # Yuborilgan postlarni olish
+        sent_posts = await session.execute(
+            select(UserProgress.post_id).where(UserProgress.user_id == user.user_id)
+        )
+        sent_ids = {row[0] for row in sent_posts.all()}
+
+        # Day 0 postlarni tartib bo'yicha olish
+        posts = await session.execute(
+            select(SchedulePost)
+            .where(SchedulePost.day_number == 0)
+            .order_by(SchedulePost.order_number)
+        )
+        posts = posts.scalars().all()
+
+        # subscription_check dan keyingi postlarni topish
+        started = False
+        remaining_posts = []
         
-        except TelegramBadRequest as e:
-            logger.error(f"❌ Bad request for user {user_id}: {e}")
-            return False
-        
-        except Exception as e:
-            logger.error(f"❌ Error sending post to {user_id}: {e}", exc_info=True)
-            return False
-    
-    async def send_unsubscribed_warning(self, user_id: int):
-        """Obuna yo'q ogohlantirishi"""
-        from keyboards.user_kb import get_subscribe_keyboard
-        from utils.texts import Texts
-        
-        try:
-            await self.bot.send_message(
-                chat_id=user_id,
-                text=Texts.UNSUBSCRIBED_WARNING,
-                reply_markup=get_subscribe_keyboard(),
-                parse_mode="HTML"
+        for post in posts:
+            if post.post_id in sent_ids:
+                if post.post_type == "subscription_check":
+                    started = True
+                continue
+            
+            if started:
+                remaining_posts.append(post)
+
+        if not remaining_posts:
+            print(f"ℹ️ No remaining posts for user {user.user_id}")
+            return
+
+        print(f"📤 Sending {len(remaining_posts)} remaining posts to user {user.user_id}")
+
+        # Qolgan postlarni yuborish
+        for i, post in enumerate(remaining_posts):
+            # Delay
+            if i > 0 or post.delay_seconds:
+                delay = post.delay_seconds or 0
+                if delay > 0:
+                    print(f"⏳ Waiting {delay} seconds before sending post {post.post_id}")
+                    await asyncio.sleep(delay)
+
+            # Postni yuborish
+            success = await self._send_post(bot, user.user_id, post)
+            
+            if success:
+                session.add(UserProgress(
+                    user_id=user.user_id, 
+                    post_id=post.post_id, 
+                    status="sent"
+                ))
+                print(f"✅ Post {post.post_id} sent to user {user.user_id}")
+
+        await session.commit()
+
+    async def send_scheduled_posts(self, session: AsyncSession):
+        """
+        Oddiy kunlar (day 1+) uchun HH:MM bo'yicha postlarni yuborish
+        Har minutda ishga tushadi
+        """
+        now = datetime.now().strftime("%H:%M")
+        moscow_now = format_moscow_time(now)
+
+        # Hozirgi vaqt uchun postlarni topish
+        posts = await session.execute(
+            select(SchedulePost)
+            .join(ScheduleDay)
+            .where(
+                ScheduleDay.day_type > 0,  # Faqat oddiy kunlar
+                SchedulePost.time == moscow_now
             )
-            logger.info(f"⚠️ Sent unsubscribed warning to user {user_id}")
-        except Exception as e:
-            logger.error(f"❌ Failed to send warning to user {user_id}: {e}")
-    
-    async def mark_user_blocked(self, user_id: int):
-        """Userni bloklangan deb belgilash"""
-        async with async_session_maker() as session:
-            try:
-                result = await session.execute(
-                    select(User).where(User.user_id == user_id)
+        )
+        posts = posts.scalars().all()
+
+        if not posts:
+            return
+
+        print(f"📅 Found {len(posts)} scheduled posts for {moscow_now}")
+
+        for post in posts:
+            # Ushbu kunda bo'lgan userlarni topish
+            users = await session.execute(
+                select(User).where(
+                    User.current_day == post.day_number,
+                    User.is_subscribed == True,
+                    User.is_blocked == False
                 )
-                user = result.scalar_one_or_none()
-                
-                if user:
-                    user.is_blocked = True
-                    user.is_active = False
-                    await session.commit()
-                    logger.info(f"🚫 Marked user {user_id} as blocked")
-            except Exception as e:
-                logger.error(f"❌ Error marking user {user_id} as blocked: {e}")
-    
-    async def update_user_days(self):
-        """Foydalanuvchilarning kunlarini yangilash"""
-        logger.info("🔄 Updating user days...")
-        
-        async with async_session_maker() as session:
-            try:
-                now = datetime.now(self.timezone)
-                current_date = now.date()
-                
-                # Barcha aktiv foydalanuvchilarni olish
-                result = await session.execute(
-                    select(User).where(
-                        and_(
-                            User.is_subscribed == True,
-                            User.is_blocked == False,
-                            User.is_active == True
-                        )
-                    )
-                )
-                users = result.scalars().all()
-                
-                updated_count = 0
-                
-                for user in users:
-                    # Foydalanuvchi necha kun oldin ro'yxatdan o'tganini hisoblash
-                    days_since_start = (current_date - user.start_date.date()).days + 1
-                    
-                    if days_since_start > user.current_day:
-                        user.current_day = days_since_start
-                        updated_count += 1
-                        logger.info(f"📅 User {user.user_id}: Day {user.current_day - 1} → {user.current_day}")
-                
-                await session.commit()
-                logger.info(f"✅ Updated {updated_count} users to new day")
-                
-            except Exception as e:
-                logger.error(f"❌ Error in update_user_days: {e}", exc_info=True)
-                await session.rollback()
-    
-    async def cleanup_old_progress(self):
-        """Eski progressni tozalash (30 kundan eski)"""
-        logger.info("🔄 Cleaning up old progress...")
-        
-        async with async_session_maker() as session:
-            try:
-                from sqlalchemy import delete
-                
-                thirty_days_ago = datetime.now(self.timezone) - timedelta(days=30)
-                
-                result = await session.execute(
-                    delete(UserProgress).where(
-                        UserProgress.sent_date < thirty_days_ago
+            )
+            
+            for user in users.scalars():
+                # Agar bu post userga yuborilgan bo'lsa, o'tkazib yuborish
+                exists = await session.execute(
+                    select(UserProgress).where(
+                        UserProgress.user_id == user.user_id,
+                        UserProgress.post_id == post.post_id
                     )
                 )
                 
-                await session.commit()
-                deleted_count = result.rowcount
-                logger.info(f"✅ Cleaned up {deleted_count} old progress records")
+                if exists.scalar():
+                    continue
+
+                # Postni yuborish
+                success = await self._send_post(self.bot, user.user_id, post)
                 
-            except Exception as e:
-                logger.error(f"❌ Error in cleanup_old_progress: {e}", exc_info=True)
-                await session.rollback()
+                if success:
+                    session.add(UserProgress(
+                        user_id=user.user_id, 
+                        post_id=post.post_id, 
+                        status="sent"
+                    ))
+                    print(f"✅ Scheduled post {post.post_id} sent to user {user.user_id}")
+        
+        await session.commit()
+
+    async def update_user_days(self, session: AsyncSession):
+        """
+        Har kuni yarim tunda barcha aktiv userlarning current_day ni oshirish
+        """
+        result = await session.execute(
+            select(User).where(
+                User.is_subscribed == True,
+                User.is_blocked == False
+            )
+        )
+        users = result.scalars().all()
+        
+        updated_count = 0
+        for user in users:
+            user.current_day += 1
+            updated_count += 1
+        
+        await session.commit()
+        print(f"📆 Updated {updated_count} users to next day")
+
+    async def cleanup_old_progress(self, session: AsyncSession):
+        """
+        30 kundan eski progresslarni tozalash
+        """
+        from datetime import timedelta
+        thirty_days_ago = datetime.now() - timedelta(days=30)
+        
+        result = await session.execute(
+            select(UserProgress).where(
+                UserProgress.sent_date < thirty_days_ago
+            )
+        )
+        old_progress = result.scalars().all()
+        
+        for progress in old_progress:
+            await session.delete(progress)
+        
+        await session.commit()
+        print(f"🗑️ Cleaned up {len(old_progress)} old progress records")
+
+    async def check_launch_users(self, session: AsyncSession):
+        """
+        Yangi userlar uchun launch sequence ni tekshirish
+        Har 30 sekundda ishga tushadi
+        """
+        users = await session.execute(
+            select(User).where(
+                User.current_day == 0,
+                User.first_message_sent == False
+            )
+        )
+        
+        for user in users.scalars():
+            print(f"🔍 Found new user {user.user_id} without launch sequence")
+            await self.send_launch_sequence(self.bot, session, user)

@@ -1,4 +1,3 @@
-# handlers/admin.py
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -10,8 +9,10 @@ from sqlalchemy import select, func, delete
 import re
 
 from database.base import User, ScheduleDay, SchedulePost, UserProgress
+from database.crud import get_setting, update_setting
 from keyboards.admin_kb import (
     get_admin_main_keyboard,
+    get_launch_day_keyboard,
     get_schedule_keyboard,
     get_day_management_keyboard,
     get_post_type_keyboard,
@@ -30,6 +31,7 @@ class AddDay(StatesGroup):
 class AddPost(StatesGroup):
     day_number = State()
     waiting_time = State()
+    waiting_delay = State()
     waiting_type = State()
     waiting_content = State()
     waiting_caption = State()
@@ -40,8 +42,23 @@ class EditPost(StatesGroup):
     post_id = State()
     waiting_field = State()
     waiting_time = State()
+    waiting_delay = State()
     waiting_content = State()
     waiting_caption = State()
+
+class EditSettings(StatesGroup):
+    waiting_welcome = State()
+    waiting_subscribe_request = State()
+    waiting_subscription_confirmed = State()
+
+
+async def get_next_order(session: AsyncSession, day_number: int) -> int:
+    """Keyingi order_number ni olish"""
+    result = await session.execute(
+        select(func.max(SchedulePost.order_number)).where(SchedulePost.day_number == day_number)
+    )
+    max_order = result.scalar() or 0
+    return max_order + 1
 
 # ============== ADMIN PANEL ==============
 
@@ -81,42 +98,107 @@ async def admin_close_callback(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin:schedule")
 async def schedule_management(callback: CallbackQuery, session: AsyncSession):
-    """Raspisaniye boshqaruvi"""
+    """Barcha kunlarni ko'rsatish"""
     if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Нет доступа")
+        await callback.answer("Нет доступа")
         return
-    
-    result = await session.execute(
-        select(ScheduleDay).order_by(ScheduleDay.day_number)
-    )
+
+    result = await session.execute(select(ScheduleDay).order_by(ScheduleDay.day_number))
     days = result.scalars().all()
-    
+
     days_data = []
     for day in days:
         post_result = await session.execute(
-            select(func.count(SchedulePost.post_id)).where(
-                SchedulePost.day_number == day.day_number
-            )
+            select(func.count(SchedulePost.post_id)).where(SchedulePost.day_number == day.day_number)
         )
         post_count = post_result.scalar()
-        days_data.append({
-            'day_number': day.day_number,
-            'post_count': post_count
-        })
-    
+        days_data.append({'day_number': day.day_number, 'post_count': post_count})
+
     if not days_data:
-        days_list = "📭 <i>Расписание пустое. Добавьте первый день.</i>"
+        days_list = "Расписание пустое. Добавьте первый день."
     else:
-        days_list = ""
-        for day in days_data:
-            days_list += f"📆 День {day['day_number']} | {day['post_count']} постов\n"
-    
+        days_list = "\n".join([f"День {d['day_number']} | {d['post_count']} постов" for d in days_data])
+
     await callback.message.edit_text(
         Texts.SCHEDULE_MANAGEMENT.format(days_list=days_list),
         reply_markup=get_schedule_keyboard(days_data),
         parse_mode="HTML"
     )
     await callback.answer()
+
+# ============== LAUNCH DAY (Day 0) ==============
+
+@router.callback_query(F.data == "launch:view")
+async def launch_day_view(callback: CallbackQuery, session: AsyncSession):
+    """Day 0 (Launch day) ni ko'rish"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа")
+        return
+
+    # Day 0 ni yaratish yoki olish
+    day_result = await session.execute(select(ScheduleDay).where(ScheduleDay.day_number == 0))
+    day = day_result.scalar_one_or_none()
+    if not day:
+        day = ScheduleDay(day_number=0, day_type=0, description="День запуска бота")
+        session.add(day)
+        await session.commit()
+
+    # Postlarni olish
+    posts_result = await session.execute(
+        select(SchedulePost)
+        .where(SchedulePost.day_number == 0)
+        .order_by(SchedulePost.order_number)
+    )
+    posts = posts_result.scalars().all()
+
+    # Ko'rsatish
+    if not posts:
+        posts_list = "📭 <i>Постов пока нет</i>\n\n" \
+                     "Добавьте посты в таком порядке:\n" \
+                     "1️⃣ Welcome сообщение (0s)\n" \
+                     "2️⃣ Проверка подписки (60s)\n" \
+                     "3️⃣ Видео урок (5s)\n" \
+                     "4️⃣ Дополнительные материалы (10s)"
+    else:
+        posts_list = ""
+        for i, p in enumerate(posts, 1):
+            delay_text = f"{p.delay_seconds}s" if p.delay_seconds else "сразу"
+            type_emoji = {
+                'text': '📝', 'photo': '🖼', 'video': '🎥',
+                'subscription_check': '✅', 'link': '🔗'
+            }.get(p.post_type, '📄')
+            
+            content_preview = truncate_text(p.content or p.caption or "Медиа")
+            posts_list += f"{i}. ⏱ {delay_text} | {type_emoji} {p.post_type}\n   \"{content_preview}\"\n\n"
+
+    await callback.message.edit_text(
+        f"<b>🚀 ДЕНЬ ЗАПУСКА БОТА (Day 0)</b>\n\n"
+        f"Посты отправляются <b>последовательно</b> после /start:\n\n"
+        f"{posts_list}",
+        reply_markup=get_launch_day_keyboard(posts),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "post:add:launch")
+async def add_post_launch_start(callback: CallbackQuery, state: FSMContext):
+    """Launch day uchun post qo'shish boshlash"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа")
+        return
+
+    await state.update_data(day_number=0)
+    await state.set_state(AddPost.waiting_type)
+
+    await callback.message.edit_text(
+        "<b>📝 Добавление поста в День запуска</b>\n\n"
+        "Выберите тип контента:",
+        reply_markup=get_post_type_keyboard(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+# ============== REGULAR DAYS ==============
 
 @router.callback_query(F.data == "schedule:add_day")
 async def add_day_start(callback: CallbackQuery, state: FSMContext):
@@ -169,7 +251,7 @@ async def add_day_number(message: Message, state: FSMContext, session: AsyncSess
             )
             return
         
-        new_day = ScheduleDay(day_number=day_number)
+        new_day = ScheduleDay(day_number=day_number, day_type=1)
         session.add(new_day)
         await session.commit()
         
@@ -219,7 +301,6 @@ async def view_day(callback: CallbackQuery, session: AsyncSession):
             content_preview = truncate_text(
                 post.content or post.caption or "Без текста"
             )
-            # Rossiya vaqtini ko'rsatish
             moscow_time = format_moscow_time(post.time)
             posts_list += f"{i}️⃣ {moscow_time} (МСК) | {type_name} | \"{content_preview}\"\n"
     
@@ -266,26 +347,25 @@ async def delete_day(callback: CallbackQuery, session: AsyncSession):
 
 # ============== POST MANAGEMENT ==============
 
-@router.callback_query(F.data.startswith("post:add:"))
+@router.callback_query(F.data.startswith("post:add:") & ~F.data.endswith(":launch"))
 async def add_post_start(callback: CallbackQuery, state: FSMContext):
-    """Post qo'shish"""
+    """Oddiy kun uchun post qo'shish"""
     if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Нет доступа")
+        await callback.answer("Нет доступа")
         return
-    
+
     day_number = int(callback.data.split(":")[2])
-    
     await state.update_data(day_number=day_number)
     await state.set_state(AddPost.waiting_time)
-    
+
     back_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад к дню", callback_data=f"schedule:day:{day_number}")]
     ])
-    
+
     await callback.message.edit_text(
         "⏰ <b>В какое время отправить пост?</b>\n\n"
         "Введите время по Москве в формате <code>ЧЧ:ММ</code>\n"
-        "Например: <code>14:30</code> или <code>09:00</code>\n\n"
+        "Например: <code>14:30</code>\n\n"
         "🕐 Часовой пояс: Москва (UTC+3)",
         reply_markup=back_kb,
         parse_mode="HTML"
@@ -328,14 +408,15 @@ async def add_post_type(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AddPost.waiting_content)
     
     type_instructions = {
-        'text': "📝 Отправьте текст сообщения.\n\nВы можете использовать форматирование:\n• <b>жирный</b>\n• <i>курсив</i>\n• <code>код</code>",
-        'photo': "🖼 Отправьте изображение.\n\n✅ Без ограничений по размеру (используется Bot API)",
-        'video': "🎥 Отправьте видео-файл.\n\n✅ Без ограничений по размеру (используется Bot API)",
+        'text': "📝 Отправьте текст сообщения.\n\n💡 Поддерживается форматирование:\n• <b>жирный</b>\n• <i>курсив</i>\n• <code>код</code>",
+        'photo': "🖼 Отправьте изображение.\n\n✅ Вы можете добавить подпись к фото.",
+        'video': "🎥 Отправьте видео-файл.\n\n✅ Вы можете добавить подпись к видео.",
         'video_note': "⭕ Отправьте видео-кружок.\n\nЗапишите через кнопку в Telegram.",
-        'audio': "🎵 Отправьте аудио-файл.\n\nФорматы: MP3, M4A, OGG",
-        'document': "📄 Отправьте документ.\n\n✅ Без ограничений по размеру (используется Bot API)",
+        'audio': "🎵 Отправьте аудио-файл.",
+        'document': "📄 Отправьте документ.",
         'link': "🔗 Отправьте текст сообщения.\n\nСсылку добавим на следующем шаге.",
-        'voice': "🎤 Отправьте голосовое сообщение.\n\nЗапишите через кнопку в Telegram."
+        'voice': "🎤 Отправьте голосовое сообщение.",
+        'subscription_check': "✅ Отправьте текст для проверки подписки.\n\nКнопки будут добавлены автоматически."
     }
     
     instruction = type_instructions.get(post_type, "Отправьте контент:")
@@ -343,7 +424,7 @@ async def add_post_type(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     day_number = data['day_number']
     back_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад к дню", callback_data=f"schedule:day:{day_number}")]
+        [InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"schedule:day:{day_number}" if day_number > 0 else "launch:view")]
     ])
     
     await callback.message.edit_text(
@@ -358,104 +439,110 @@ async def add_post_content(message: Message, state: FSMContext, session: AsyncSe
     """Kontent qabul qilish"""
     data = await state.get_data()
     post_type = data['post_type']
+    day_number = data.get('day_number')
+
+    if day_number is None:
+        await message.answer("❌ Ошибка: день не выбран")
+        await state.clear()
+        return
     
     content = None
     file_id = None
     caption = None
-    
-    if post_type == 'text' or post_type == 'link':
+
+    # Kontentni olish
+    if post_type == 'text' or post_type == 'subscription_check':
         if not message.text:
-            back_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад к дню", callback_data=f"schedule:day:{data['day_number']}")]
-            ])
-            await message.answer("❌ Отправьте текст сообщения.", reply_markup=back_kb)
+            await message.answer("❌ Отправьте текст сообщения.")
             return
         content = message.text
-        
-        if post_type == 'link':
-            await state.update_data(content=content)
-            await state.set_state(AddPost.waiting_link_url)
-            back_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад к дню", callback_data=f"schedule:day:{data['day_number']}")]
-            ])
-            await message.answer(
-                "🔗 <b>Шаг 2 из 3</b>\n\n"
-                "Введите URL-адрес:\n"
-                "Например: https://example.com",
-                reply_markup=back_kb,
-                parse_mode="HTML"
-            )
-            return
     
     elif post_type == 'photo':
         if not message.photo:
-            back_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад к дню", callback_data=f"schedule:day:{data['day_number']}")]
-            ])
-            await message.answer("❌ Отправьте изображение.", reply_markup=back_kb)
+            await message.answer("❌ Отправьте изображение.")
             return
         file_id = message.photo[-1].file_id
         caption = message.caption
     
     elif post_type == 'video':
         if not message.video:
-            back_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад к дню", callback_data=f"schedule:day:{data['day_number']}")]
-            ])
-            await message.answer("❌ Отправьте видео.", reply_markup=back_kb)
+            await message.answer("❌ Отправьте видео.")
             return
         file_id = message.video.file_id
         caption = message.caption
     
     elif post_type == 'video_note':
         if not message.video_note:
-            back_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад к дню", callback_data=f"schedule:day:{data['day_number']}")]
-            ])
-            await message.answer("❌ Отправьте видео-кружок.", reply_markup=back_kb)
+            await message.answer("❌ Отправьте видео-кружок.")
             return
         file_id = message.video_note.file_id
     
     elif post_type == 'audio':
         if not message.audio and not message.voice:
-            back_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад к дню", callback_data=f"schedule:day:{data['day_number']}")]
-            ])
-            await message.answer("❌ Отправьте аудио.", reply_markup=back_kb)
+            await message.answer("❌ Отправьте аудио.")
             return
         file_id = message.audio.file_id if message.audio else message.voice.file_id
         caption = message.caption
     
     elif post_type == 'document':
         if not message.document:
-            back_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад к дню", callback_data=f"schedule:day:{data['day_number']}")]
-            ])
-            await message.answer("❌ Отправьте документ.", reply_markup=back_kb)
+            await message.answer("❌ Отправьте документ.")
             return
         file_id = message.document.file_id
         caption = message.caption
     
     elif post_type == 'voice':
         if not message.voice:
-            back_kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад к дню", callback_data=f"schedule:day:{data['day_number']}")]
-            ])
-            await message.answer("❌ Отправьте голосовое сообщение.", reply_markup=back_kb)
+            await message.answer("❌ Отправьте голосовое сообщение.")
             return
         file_id = message.voice.file_id
-        caption = message.caption
     
-    day_number = data['day_number']
-    time = data['time']
-    
+    elif post_type == 'link':
+        if not message.text:
+            await message.answer("❌ Отправьте текст сообщения.")
+            return
+        content = message.text
+        
+        # Link uchun keyingi step
+        await state.update_data(content=content)
+        await state.set_state(AddPost.waiting_link_url)
+        await message.answer(
+            "🔗 <b>Шаг 2 из 3</b>\n\n"
+            "Введите URL-адрес:\n"
+            "Например: https://example.com",
+            parse_mode="HTML"
+        )
+        return
+
+    # Day 0 uchun delay so'rash
+    if day_number == 0:
+        await state.update_data(
+            content=content,
+            file_id=file_id,
+            caption=caption
+        )
+        await state.set_state(AddPost.waiting_delay)
+        await message.answer(
+            "⏱ <b>Задержка перед отправкой</b>\n\n"
+            "Через сколько секунд отправить этот пост после предыдущего?\n\n"
+            "💡 Введите число:\n"
+            "• 0 = сразу\n"
+            "• 60 = через 1 минуту\n"
+            "• 300 = через 5 минут",
+            parse_mode="HTML"
+        )
+        return
+
+    # Oddiy kun uchun saqlash
+    time = data.get('time')
     new_post = SchedulePost(
         day_number=day_number,
         post_type=post_type,
         content=content,
         file_id=file_id,
         caption=caption,
-        time=time
+        time=time,
+        order_number=await get_next_order(session, day_number)
     )
     session.add(new_post)
     await session.commit()
@@ -471,34 +558,24 @@ async def add_post_content(message: Message, state: FSMContext, session: AsyncSe
     )
     await state.clear()
 
+
+
 @router.message(AddPost.waiting_link_url)
 async def add_post_link_url(message: Message, state: FSMContext):
     """Havola URLni qabul qilish"""
-    data = await state.get_data()
     url_pattern = r'https?://(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&/=]*)'
     
     if not re.match(url_pattern, message.text):
-        back_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад к дню", callback_data=f"schedule:day:{data['day_number']}")]
-        ])
-        await message.answer(
-            "❌ Введите корректный URL.\nПример: https://example.com",
-            reply_markup=back_kb
-        )
+        await message.answer("❌ Введите корректный URL.\nПример: https://example.com")
         return
     
     await state.update_data(link_url=message.text)
     await state.set_state(AddPost.waiting_button_text)
     
-    back_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад к дню", callback_data=f"schedule:day:{data['day_number']}")]
-    ])
-    
     await message.answer(
-        "🔗 <b>Шаг 3 из 3</b>\n\n"
+        "🔘 <b>Шаг 3 из 3</b>\n\n"
         "Введите текст кнопки:\n"
         "Например: \"Перейти к материалам\"",
-        reply_markup=back_kb,
         parse_mode="HTML"
     )
 
@@ -507,6 +584,7 @@ async def add_post_button_text(message: Message, state: FSMContext, session: Asy
     """Tugma textini qabul qilish va saqlash"""
     button_text = message.text
     data = await state.get_data()
+    day_number = data['day_number']
     
     buttons = {
         'inline': [
@@ -514,20 +592,33 @@ async def add_post_button_text(message: Message, state: FSMContext, session: Asy
         ]
     }
     
+    # Day 0 uchun delay so'rash
+    if day_number == 0:
+        await state.update_data(buttons=buttons)
+        await state.set_state(AddPost.waiting_delay)
+        await message.answer(
+            "⏱ Через сколько секунд отправить этот пост?\n"
+            "Введите число (0 = сразу):",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Oddiy kun uchun saqlash
     new_post = SchedulePost(
-        day_number=data['day_number'],
+        day_number=day_number,
         post_type='link',
         content=data['content'],
         time=data['time'],
-        buttons=buttons
+        buttons=buttons,
+        order_number=await get_next_order(session, day_number)
     )
     session.add(new_post)
     await session.commit()
     
     moscow_time = format_moscow_time(data['time'])
     await message.answer(
-        f"✅ <b>Пост со ссылкой успешно добавлен!</b>\n\n"
-        f"📆 День: {data['day_number']}\n"
+        f"✅ <b>Пост со ссылкой добавлен!</b>\n\n"
+        f"📆 День: {day_number}\n"
         f"⏰ Время: {moscow_time} (МСК)\n"
         f"🔗 Ссылка: {data['link_url']}\n"
         f"🔘 Кнопка: {button_text}",
@@ -647,6 +738,23 @@ async def edit_post_menu(callback: CallbackQuery, session: AsyncSession):
         f"📝 Тип: {post.post_type}\n\n"
         f"Выберите, что хотите изменить:",
         reply_markup=get_edit_post_keyboard(post_id, post.post_type, post.day_number),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "post:add:launch")
+async def add_post_launch_start(callback: CallbackQuery, state: FSMContext):
+    """Launch day uchun post qo'shish"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа")
+        return
+
+    await state.update_data(day_number=0)
+    await state.set_state(AddPost.waiting_type)
+
+    await callback.message.edit_text(
+        "Выберите тип контента для <b>Дня запуска</b>:",
+        reply_markup=get_post_type_keyboard(),
         parse_mode="HTML"
     )
     await callback.answer()
@@ -1015,3 +1123,47 @@ async def save_confirmed_text(message: Message, state: FSMContext):
     )
     
     await state.clear()
+
+
+
+@router.message(AddPost.waiting_delay)
+async def add_post_delay(message: Message, state: FSMContext, session: AsyncSession):
+    """Delay qabul qilish va saqlash (Day 0 uchun)"""
+    try:
+        delay = int(message.text)
+        
+        if delay < 0:
+            await message.answer("❌ Задержка не может быть отрицательной.")
+            return
+        
+        data = await state.get_data()
+        
+        # Agar link uchun buttons bo'lsa
+        buttons = data.get('buttons')
+        
+        # Post yaratish
+        new_post = SchedulePost(
+            day_number=0,
+            post_type=data['post_type'],
+            content=data.get('content'),
+            file_id=data.get('file_id'),
+            caption=data.get('caption'),
+            buttons=buttons,
+            delay_seconds=delay,
+            order_number=await get_next_order(session, 0)
+        )
+        session.add(new_post)
+        await session.commit()
+
+        await message.answer(
+            f"✅ <b>Пост добавлен в День запуска!</b>\n\n"
+            f"⏱ Задержка: {delay} секунд\n"
+            f"📝 Тип: {data['post_type']}\n"
+            f"🔢 Порядок: {new_post.order_number}",
+            reply_markup=get_admin_main_keyboard(),
+            parse_mode="HTML"
+        )
+        await state.clear()
+        
+    except ValueError:
+        await message.answer("❌ Введите корректное число секунд.")
