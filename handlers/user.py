@@ -115,16 +115,13 @@ async def check_sub_callback(callback: CallbackQuery, session: AsyncSession):
 
         await callback.message.answer(confirmed_text, parse_mode="HTML")
 
-        # ENDI Day 0 (День запуска) postlari ketma-ket yuboriladi
         scheduler = SchedulerTasks(callback.bot)
-        # Bu yerda to'liq sequence'ni boshlaymiz
         await scheduler.send_launch_sequence(callback.bot, session, user)
 
         await callback.answer("✅ Подписка подтверждена!")
         print(f"✅ User {user_id} subscription confirmed")
 
     else:
-        # Obuna topilmadi – yana запрос подписки jo'natamiz
         subscribe_text = await get_setting("subscribe_request", Texts.SUBSCRIBE_REQUEST)
 
         await callback.answer("❌ Вы еще не подписаны на канал!", show_alert=True)
