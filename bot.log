@@ -10382,3 +10382,60 @@ AttributeError: 'Bot' object has no attribute '_send_post'. Did you mean: 'send_
 2025-11-13 05:05:35,330 - apscheduler.executors.default - INFO - Running job "send_scheduled_posts_wrapper (trigger: interval[0:01:00], next run at: 2025-11-13 05:06:35 +05)" (scheduled at 2025-11-13 05:05:35.327228+05:00)
 2025-11-13 05:05:35,333 - apscheduler.executors.default - INFO - Job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-13 05:06:05 +05)" executed successfully
 2025-11-13 05:05:35,333 - apscheduler.executors.default - INFO - Job "send_scheduled_posts_wrapper (trigger: interval[0:01:00], next run at: 2025-11-13 05:06:35 +05)" executed successfully
+2025-11-28 15:14:35,590 - __main__ - INFO - Configuration validated
+2025-11-28 15:14:35,591 - __main__ - INFO - Timezone: Europe/Moscow
+2025-11-28 15:14:35,689 - __main__ - INFO - Database initialized
+2025-11-28 15:14:35,693 - apscheduler.scheduler - INFO - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2025-11-28 15:14:35,693 - apscheduler.scheduler - INFO - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2025-11-28 15:14:35,693 - apscheduler.scheduler - INFO - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2025-11-28 15:14:35,693 - apscheduler.scheduler - INFO - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2025-11-28 15:14:35,695 - apscheduler.scheduler - INFO - Added job "check_launch_users_wrapper" to job store "default"
+2025-11-28 15:14:35,695 - apscheduler.scheduler - INFO - Added job "send_scheduled_posts_wrapper" to job store "default"
+2025-11-28 15:14:35,695 - apscheduler.scheduler - INFO - Added job "update_user_days_wrapper" to job store "default"
+2025-11-28 15:14:35,695 - apscheduler.scheduler - INFO - Added job "cleanup_old_progress_wrapper" to job store "default"
+2025-11-28 15:14:35,695 - apscheduler.scheduler - INFO - Scheduler started
+2025-11-28 15:14:35,695 - __main__ - INFO - Scheduler started
+2025-11-28 15:14:36,894 - __main__ - WARNING - Failed to notify admin 241712036: Telegram server says - Bad Request: chat not found
+2025-11-28 15:14:36,894 - __main__ - INFO - Bot started!
+2025-11-28 15:14:36,894 - aiogram.dispatcher - INFO - Start polling
+2025-11-28 15:14:37,205 - aiogram.dispatcher - INFO - Run polling for bot @pprojecttestmybot id=8247381561 - 'for_mytes'
+2025-11-28 15:14:42,527 - aiogram.event - INFO - Update id=579668201 is handled. Duration 1088 ms by bot id=8247381561
+2025-11-28 15:14:51,030 - aiogram.event - INFO - Update id=579668202 is handled. Duration 615 ms by bot id=8247381561
+2025-11-28 15:15:02,047 - aiogram.event - INFO - Update id=579668203 is handled. Duration 157 ms by bot id=8247381561
+2025-11-28 15:15:04,136 - aiogram.event - INFO - Update id=579668204 is handled. Duration 514 ms by bot id=8247381561
+2025-11-28 15:15:04,953 - aiogram.event - INFO - Update id=579668205 is handled. Duration 286 ms by bot id=8247381561
+2025-11-28 15:15:05,695 - apscheduler.executors.default - INFO - Running job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:15:35 +05)" (scheduled at 2025-11-28 15:15:05.693088+05:00)
+2025-11-28 15:15:06,608 - apscheduler.executors.default - INFO - Job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:15:35 +05)" executed successfully
+2025-11-28 15:15:07,519 - aiogram.event - INFO - Update id=579668206 is handled. Duration 1792 ms by bot id=8247381561
+2025-11-28 15:15:13,355 - aiogram.event - INFO - Update id=579668207 is handled. Duration 620 ms by bot id=8247381561
+2025-11-28 15:15:14,650 - aiogram.event - INFO - Update id=579668208 is handled. Duration 375 ms by bot id=8247381561
+2025-11-28 15:15:16,627 - aiogram.event - INFO - Update id=579668209 is handled. Duration 307 ms by bot id=8247381561
+2025-11-28 15:15:27,585 - aiogram.event - INFO - Update id=579668210 is handled. Duration 308 ms by bot id=8247381561
+2025-11-28 15:15:30,353 - aiogram.event - INFO - Update id=579668211 is handled. Duration 510 ms by bot id=8247381561
+2025-11-28 15:15:32,806 - aiogram.event - INFO - Update id=579668212 is handled. Duration 171 ms by bot id=8247381561
+2025-11-28 15:15:35,676 - aiogram.event - INFO - Update id=579668213 is not handled. Duration 3 ms by bot id=8247381561
+2025-11-28 15:15:35,694 - apscheduler.executors.default - INFO - Running job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:16:05 +05)" (scheduled at 2025-11-28 15:15:35.693088+05:00)
+2025-11-28 15:15:35,695 - apscheduler.executors.default - INFO - Running job "send_scheduled_posts_wrapper (trigger: interval[0:01:00], next run at: 2025-11-28 15:16:35 +05)" (scheduled at 2025-11-28 15:15:35.693392+05:00)
+2025-11-28 15:15:35,705 - apscheduler.executors.default - INFO - Job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:16:05 +05)" executed successfully
+2025-11-28 15:15:35,706 - apscheduler.executors.default - INFO - Job "send_scheduled_posts_wrapper (trigger: interval[0:01:00], next run at: 2025-11-28 15:16:35 +05)" executed successfully
+2025-11-28 15:15:38,642 - aiogram.event - INFO - Update id=579668214 is handled. Duration 614 ms by bot id=8247381561
+2025-11-28 15:16:05,695 - apscheduler.executors.default - INFO - Running job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:16:35 +05)" (scheduled at 2025-11-28 15:16:05.693088+05:00)
+2025-11-28 15:16:06,486 - apscheduler.executors.default - INFO - Job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:16:35 +05)" executed successfully
+2025-11-28 15:16:07,625 - aiogram.event - INFO - Update id=579668215 is handled. Duration 194 ms by bot id=8247381561
+2025-11-28 15:16:09,687 - aiogram.event - INFO - Update id=579668216 is handled. Duration 734 ms by bot id=8247381561
+2025-11-28 15:16:35,699 - apscheduler.executors.default - INFO - Running job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:17:05 +05)" (scheduled at 2025-11-28 15:16:35.693088+05:00)
+2025-11-28 15:16:35,701 - apscheduler.executors.default - INFO - Running job "send_scheduled_posts_wrapper (trigger: interval[0:01:00], next run at: 2025-11-28 15:17:35 +05)" (scheduled at 2025-11-28 15:16:35.693392+05:00)
+2025-11-28 15:16:35,706 - apscheduler.executors.default - INFO - Job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:17:05 +05)" executed successfully
+2025-11-28 15:16:35,707 - apscheduler.executors.default - INFO - Job "send_scheduled_posts_wrapper (trigger: interval[0:01:00], next run at: 2025-11-28 15:17:35 +05)" executed successfully
+2025-11-28 15:17:05,700 - apscheduler.executors.default - INFO - Running job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:17:35 +05)" (scheduled at 2025-11-28 15:17:05.693088+05:00)
+2025-11-28 15:17:05,705 - apscheduler.executors.default - INFO - Job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:17:35 +05)" executed successfully
+2025-11-28 15:17:35,698 - apscheduler.executors.default - INFO - Running job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:18:05 +05)" (scheduled at 2025-11-28 15:17:35.693088+05:00)
+2025-11-28 15:17:35,700 - apscheduler.executors.default - INFO - Running job "send_scheduled_posts_wrapper (trigger: interval[0:01:00], next run at: 2025-11-28 15:18:35 +05)" (scheduled at 2025-11-28 15:17:35.693392+05:00)
+2025-11-28 15:17:35,706 - apscheduler.executors.default - INFO - Job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:18:05 +05)" executed successfully
+2025-11-28 15:17:35,709 - apscheduler.executors.default - INFO - Job "send_scheduled_posts_wrapper (trigger: interval[0:01:00], next run at: 2025-11-28 15:18:35 +05)" executed successfully
+2025-11-28 15:18:05,699 - apscheduler.executors.default - INFO - Running job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:18:35 +05)" (scheduled at 2025-11-28 15:18:05.693088+05:00)
+2025-11-28 15:18:05,702 - apscheduler.executors.default - INFO - Job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:18:35 +05)" executed successfully
+2025-11-28 15:18:35,697 - apscheduler.executors.default - INFO - Running job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:19:05 +05)" (scheduled at 2025-11-28 15:18:35.693088+05:00)
+2025-11-28 15:18:35,699 - apscheduler.executors.default - INFO - Running job "send_scheduled_posts_wrapper (trigger: interval[0:01:00], next run at: 2025-11-28 15:19:35 +05)" (scheduled at 2025-11-28 15:18:35.693392+05:00)
+2025-11-28 15:18:35,704 - apscheduler.executors.default - INFO - Job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2025-11-28 15:19:05 +05)" executed successfully
+2025-11-28 15:18:35,704 - apscheduler.executors.default - INFO - Job "send_scheduled_posts_wrapper (trigger: interval[0:01:00], next run at: 2025-11-28 15:19:35 +05)" executed successfully

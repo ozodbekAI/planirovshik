@@ -31,26 +31,60 @@ def get_admin_main_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_launch_day_keyboard(posts: list) -> InlineKeyboardMarkup:
-    """Launch day klaviaturasi"""
+    """
+    Клавиатура для Дня запуска:
+    1) сверху – настройки Welcome/подписки,
+    2) ниже – список постов Day 0,
+    3) затем – «Добавить пост» и «Назад в меню».
+    """
     builder = InlineKeyboardBuilder()
-    
-    # Har bir post uchun tugma
+
+    # --------- БЛОК НАСТРОЕК (первый скрин) ---------
+    builder.row(
+        InlineKeyboardButton(
+            text="✏️ Изменить Welcome сообщение",
+            callback_data="settings:edit:welcome"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="✏️ Изменить текст подписки",
+            callback_data="settings:edit:subscribe"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="✏️ Подтверждение подписки",
+            callback_data="settings:edit:confirmed"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="👁 Просмотр текущих текстов",
+            callback_data="settings:view"
+        )
+    )
+
+    # --------- СПИСОК ПОСТОВ ДНЯ ЗАПУСКА (второй скрин) ---------
     for i, post in enumerate(posts, 1):
+        delay_text = f"{post.delay_seconds}s" if post.delay_seconds else "0s"
+
+        # Чуть более понятный текст, как на скрине: "1. photo (0s)" и т.д.
         builder.row(
             InlineKeyboardButton(
-                text=f"{i}. {post.post_type} ({post.delay_seconds}s)",
+                text=f"{i}. {post.post_type} ({delay_text})",
                 callback_data=f"post:view:{post.post_id}"
             )
         )
-    
-    # Boshqaruv tugmalari
+
+    # --------- УПРАВЛЕНИЕ ДНЁМ ЗАПУСКА ---------
     builder.row(
         InlineKeyboardButton(text="➕ Добавить пост", callback_data="post:add:launch")
     )
     builder.row(
         InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="admin:main")
     )
-    
+
     return builder.as_markup()
 
 
@@ -249,6 +283,7 @@ def get_broadcast_confirm_keyboard(broadcast_type: str) -> InlineKeyboardMarkup:
     
     return builder.as_markup()
 
+
 def get_broadcast_type_keyboard() -> InlineKeyboardMarkup:
     """Rассылка turi klaviaturasi"""
     builder = InlineKeyboardBuilder()
@@ -268,6 +303,7 @@ def get_broadcast_type_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="admin:main")
     )
     return builder.as_markup()
+
 
 def get_broadcast_target_keyboard(total_users: int, active_users: int) -> InlineKeyboardMarkup:
     """Rассылка maqsadi klaviaturasi"""

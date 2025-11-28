@@ -4,6 +4,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+
 from database.base import User
 from keyboards.user_kb import get_subscribe_keyboard
 from utils.texts import Texts
@@ -13,8 +14,6 @@ from scheduler.tasks import SchedulerTasks
 
 router = Router()
 
-from database.crud import get_setting
-from utils.texts import Texts
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, session: AsyncSession):
@@ -27,6 +26,7 @@ async def cmd_start(message: Message, session: AsyncSession):
     user = result.scalar_one_or_none()
 
     if not user:
+        # Yangi foydalanuvchi
         user = User(
             user_id=user_id,
             username=username,
@@ -36,11 +36,12 @@ async def cmd_start(message: Message, session: AsyncSession):
             subscription_checked=False,
             is_subscribed=False,
             is_active=True,
-            is_blocked=False
+            is_blocked=False,
         )
         session.add(user)
         print(f"✨ New user created: {user_id}")
     else:
+        # /start bosilganda funnelni noldan boshlaymiz
         user.is_active = True
         user.current_day = 0
         user.first_message_sent = False
@@ -50,26 +51,40 @@ async def cmd_start(message: Message, session: AsyncSession):
 
     await session.commit()
 
-    # 🔹 1. Welcome matnini olish (DB bo'lmasa – default Texts.WELCOME)
+    # 1) Welcome matni (DB bo'lmasa – default Texts.WELCOME)
     welcome_text = await get_setting("welcome_text", Texts.WELCOME)
-    welcome_text = welcome_text.format(name=first_name)
+    # {name} o'zgaruvchisini almashtiramiz
+    try:
+        welcome_text = welcome_text.format(name=first_name)
+    except Exception:
+        # Agar formatdagi xato bo'lsa – oddiy yuboramiz
+        pass
 
     await message.answer(welcome_text, parse_mode="HTML")
 
-    # 🔹 2. Launch sequence boshlash (Day 0 postlar)
-    scheduler = SchedulerTasks(message.bot)
-    await scheduler.send_launch_sequence(message.bot, session, user)
+    # 2) Подписка so'rovi + klaviatura
+    subscribe_text = await get_setting("subscribe_request", Texts.SUBSCRIBE_REQUEST)
+    await message.answer(
+        subscribe_text,
+        reply_markup=get_subscribe_keyboard(),
+        parse_mode="HTML",
+    )
 
+    # MUHIM: bu yerda launch-postlar BOSHLANMAYDI.
+    # Day 0 postlari faqat obuna tasdiqlangandan keyin yuboriladi.
 
 
 @router.callback_query(F.data == "check_subscription")
 async def check_sub_callback(callback: CallbackQuery, session: AsyncSession):
     """
-    Obuna tekshirish callback - user obuna bo'lganini tasdiqlaydi
+    Обновленная логика проверки подписки:
+    - tekshiradi,
+    - agar OK bo'lsa: tasdiqlash matni + Day 0 postlar,
+    - agar yo'q bo'lsa: yana запрос подписки.
     """
     user_id = callback.from_user.id
-    
-    # Kanalga obuna bo'lganligini tekshirish
+
+    # Kanalga obuna bo'lganligini tekshirish (helper orqali)
     is_subscribed = await check_subscription(callback.bot, user_id)
 
     # Userni bazadan olish
@@ -83,17 +98,38 @@ async def check_sub_callback(callback: CallbackQuery, session: AsyncSession):
     if is_subscribed:
         # Obunani tasdiqlash
         user.is_subscribed = True
+        user.subscription_checked = True
         await session.commit()
 
-        # Tasdiqlash xabarini ko'rsatish
-        confirmed_text = await get_setting('subscription_confirmed', Texts.SUBSCRIPTION_CONFIRMED)
-        await callback.message.edit_text(confirmed_text, parse_mode="HTML")
+        # Tasdiqlash xabari (подтверждение подписки)
+        confirmed_text = await get_setting(
+            "subscription_confirmed",
+            Texts.SUBSCRIPTION_CONFIRMED,
+        )
 
-        # Qolgan postlarni yuborish
+        # Eski keyboardni olib tashlashga harakat qilamiz
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        await callback.message.answer(confirmed_text, parse_mode="HTML")
+
+        # ENDI Day 0 (День запуска) postlari ketma-ket yuboriladi
         scheduler = SchedulerTasks(callback.bot)
-        await scheduler.send_remaining_launch_posts(callback.bot, session, user)
-        
-        await callback.answer("✅ Подписка подтверждена!", show_alert=True)
+        # Bu yerda to'liq sequence'ni boshlaymiz
+        await scheduler.send_launch_sequence(callback.bot, session, user)
+
+        await callback.answer("✅ Подписка подтверждена!")
         print(f"✅ User {user_id} subscription confirmed")
+
     else:
+        # Obuna topilmadi – yana запрос подписки jo'natamiz
+        subscribe_text = await get_setting("subscribe_request", Texts.SUBSCRIBE_REQUEST)
+
         await callback.answer("❌ Вы еще не подписаны на канал!", show_alert=True)
+        await callback.message.answer(
+            subscribe_text,
+            reply_markup=get_subscribe_keyboard(),
+            parse_mode="HTML",
+        )

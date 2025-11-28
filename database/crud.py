@@ -23,7 +23,7 @@ async def get_setting(key: str, default: str = None) -> str:
 
 async def update_setting(key: str, value: str):
     """Sozlamani yangilash yoki yaratish"""
-    async with async_session_maker() as session:  # async_session_maker ishlatiladi
+    async with async_session_maker() as session:
         result = await session.execute(
             select(Setting).where(Setting.setting_key == key)
         )
