@@ -1,4 +1,5 @@
 # handlers/user.py
+import asyncio
 from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
@@ -57,6 +58,9 @@ async def cmd_start(message: Message, session: AsyncSession):
         pass
 
     await message.answer(welcome_text, parse_mode="HTML")
+
+    # 🔸 2 sekundlik pauza, shunda xabarlar bir vaqtda ketmaydi
+    await asyncio.sleep(2)
 
     # 2) Подписка so‘rovi
     subscribe_text = await get_setting("subscribe_request", Texts.SUBSCRIBE_REQUEST)
