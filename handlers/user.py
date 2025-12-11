@@ -21,12 +21,10 @@ async def cmd_start(message: Message, session: AsyncSession):
     username = message.from_user.username
     first_name = message.from_user.first_name or "Друг"
 
-    # Userni bazadan qidirish
     result = await session.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()
 
     if not user:
-        # Yangi foydalanuvchi
         user = User(
             user_id=user_id,
             username=username,
@@ -51,43 +49,37 @@ async def cmd_start(message: Message, session: AsyncSession):
 
     await session.commit()
 
-    # 1) Welcome matni (DB bo'lmasa – default Texts.WELCOME)
+    # 1) Welcome matni
     welcome_text = await get_setting("welcome_text", Texts.WELCOME)
-    # {name} o'zgaruvchisini almashtiramiz
     try:
         welcome_text = welcome_text.format(name=first_name)
     except Exception:
-        # Agar formatdagi xato bo'lsa – oddiy yuboramiz
         pass
 
     await message.answer(welcome_text, parse_mode="HTML")
 
-    # 2) Подписка so'rovi + klaviatura
+    # 2) Подписка so‘rovi
     subscribe_text = await get_setting("subscribe_request", Texts.SUBSCRIBE_REQUEST)
     await message.answer(
         subscribe_text,
         reply_markup=get_subscribe_keyboard(),
         parse_mode="HTML",
     )
-
-    # MUHIM: bu yerda launch-postlar BOSHLANMAYDI.
-    # Day 0 postlari faqat obuna tasdiqlangandan keyin yuboriladi.
+    # Day 0 postlari faqat obuna tasdiqlangandan keyin yuboriladi
 
 
 @router.callback_query(F.data == "check_subscription")
 async def check_sub_callback(callback: CallbackQuery, session: AsyncSession):
     """
     Обновленная логика проверки подписки:
-    - tekshiradi,
-    - agar OK bo'lsa: tasdiqlash matni + Day 0 postlar,
-    - agar yo'q bo'lsa: yana запрос подписки.
+    - obunani tekshiradi,
+    - OK bo‘lsa: eski xabarni o‘chiradi, tasdiqlash matni + Day 0,
+    - aks holda: yana запрос подписки.
     """
     user_id = callback.from_user.id
 
-    # Kanalga obuna bo'lganligini tekshirish (helper orqali)
     is_subscribed = await check_subscription(callback.bot, user_id)
 
-    # Userni bazadan olish
     result = await session.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()
 
@@ -96,25 +88,28 @@ async def check_sub_callback(callback: CallbackQuery, session: AsyncSession):
         return
 
     if is_subscribed:
-        # Obunani tasdiqlash
         user.is_subscribed = True
         user.subscription_checked = True
         await session.commit()
 
-        # Tasdiqlash xabari (подтверждение подписки)
         confirmed_text = await get_setting(
             "subscription_confirmed",
             Texts.SUBSCRIPTION_CONFIRMED,
         )
 
-        # Eski keyboardni olib tashlashga harakat qilamiz
+        # Eski "Подпишитесь" xabarini o‘chiramiz, shunda u tepada qolmaydi
         try:
-            await callback.message.edit_reply_markup(reply_markup=None)
+            await callback.message.delete()
         except Exception:
-            pass
+            # Agar delete bo‘lmasa – kamida keyboardni olib tashlaymiz
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except Exception:
+                pass
 
         await callback.message.answer(confirmed_text, parse_mode="HTML")
 
+        # Day 0 launch sequence – endi bu yerda ishga tushadi
         scheduler = SchedulerTasks(callback.bot)
         await scheduler.send_launch_sequence(callback.bot, session, user)
 
