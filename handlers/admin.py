@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
 import re
 
-from database.base import User, ScheduleDay, SchedulePost, UserProgress
+from database.base import Survey, User, ScheduleDay, SchedulePost, UserProgress
 from database.crud import get_setting, update_setting
 from keyboards.admin_kb import (
     get_admin_main_keyboard,
@@ -20,7 +20,11 @@ from keyboards.admin_kb import (
     get_edit_post_keyboard,
 )
 from utils.texts import Texts
-from utils.helpers import is_admin, truncate_text, format_moscow_time
+from utils.helpers import is_admin, truncate_text, format_moscow_time, strip_html
+import html
+
+from utils.telegram_html import repair_telegram_html, preview_plain, safe_answer_html
+
 
 router = Router(name="admin_router")
 
@@ -184,8 +188,10 @@ async def launch_day_view(callback: CallbackQuery, session: AsyncSession):
                 "document": "📄",
                 "voice": "🎤",
             }.get(p.post_type, "📄")
-
-            content_preview = truncate_text(p.content or p.caption or "Медиа")
+            
+            raw_preview = p.content or p.caption or "Медиа"
+            content_preview = html.escape(raw_preview)
+            content_preview = truncate_text(content_preview, 80)
             posts_list += f"{i}. ⏱ {delay_text} | {type_emoji} {p.post_type}\n   \"{content_preview}\"\n\n"
 
     await callback.message.edit_text(
@@ -414,6 +420,104 @@ async def add_post_time(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
 
+@router.callback_query(F.data == "posttype:survey")
+async def add_survey_post_type(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Anketa post turini tanlash"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа")
+        return
+    
+    # Get all active surveys
+    result = await session.execute(
+        select(Survey).where(Survey.is_active == True).order_by(Survey.created_at.desc())
+    )
+    surveys = result.scalars().all()
+    
+    if not surveys:
+        await callback.answer(
+            "❌ Нет доступных анкет. Сначала создайте анкету в разделе 'Анкеты'",
+            show_alert=True
+        )
+        return
+    
+    data = await state.get_data()
+    day_number = data.get("day_number", 0)
+    
+    from keyboards.admin_kb import get_survey_selection_keyboard
+    
+    await callback.message.edit_text(
+        "📋 <b>Выберите анкету:</b>\n\n"
+        "Какую анкету добавить в этот пост?",
+        reply_markup=get_survey_selection_keyboard(surveys, day_number),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("select_survey:"))
+async def select_survey_for_post(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Tanlangan anketani postga qo'shish"""
+    parts = callback.data.split(":")
+    survey_id = int(parts[1])
+    day_number = int(parts[2])
+    
+    # Get survey
+    result = await session.execute(
+        select(Survey).where(Survey.survey_id == survey_id)
+    )
+    survey = result.scalar_one_or_none()
+    
+    if not survey:
+        await callback.answer("❌ Анкета не найдена")
+        return
+    
+    data = await state.get_data()
+    
+    # Day 0 uchun delay so'rash
+    if day_number == 0:
+        await state.update_data(
+            post_type="survey",
+            survey_id=survey_id,
+            day_number=day_number
+        )
+        await state.set_state(AddPost.waiting_delay)
+        
+        await callback.message.edit_text(
+            "⏱ <b>Задержка перед отправкой</b>\n\n"
+            "Через сколько секунд отправить анкету после предыдущего поста?\n\n"
+            "💡 Введите число:\n"
+            "• 0 = сразу\n"
+            "• 60 = через 1 минуту\n"
+            "• 300 = через 5 минут",
+            parse_mode="HTML"
+        )
+    else:
+        # Oddiy kun uchun to'g'ridan-to'g'ri saqlash
+        time = data.get("time")
+        
+        new_post = SchedulePost(
+            day_number=day_number,
+            post_type="survey",
+            survey_id=survey_id,
+            time=time,
+            order_number=await get_next_order(session, day_number)
+        )
+        session.add(new_post)
+        await session.commit()
+        
+        moscow_time = format_moscow_time(time)
+        
+        await callback.message.answer(
+            f"✅ <b>Анкета добавлена!</b>\n\n"
+            f"📆 День: {day_number}\n"
+            f"⏰ Время: {moscow_time} (МСК)\n"
+            f"📋 Анкета: {survey.name}",
+            reply_markup=get_admin_main_keyboard(),
+            parse_mode="HTML"
+        )
+        await state.clear()
+    
+    await callback.answer()
 
 @router.callback_query(F.data.startswith("posttype:"))
 async def add_post_type(callback: CallbackQuery, state: FSMContext):
@@ -531,6 +635,7 @@ async def add_post_content(message: Message, state: FSMContext, session: AsyncSe
             parse_mode="HTML",
         )
         return
+        
 
     # Day 0 uchun delay so'rash
     if day_number == 0:
@@ -654,57 +759,111 @@ async def view_post(callback: CallbackQuery, session: AsyncSession):
         return
 
     try:
+        # TEXT
         if post.post_type == "text":
-            await callback.message.answer(f"👁 <b>ПРЕДПРОСМОТР:</b>\n\n{post.content}", parse_mode="HTML")
+            await safe_answer_html(
+                callback.message,
+                f"👁 <b>ПРЕДПРОСМОТР:</b>\n\n{post.content or ''}",
+                disable_web_page_preview=True,
+            )
+
+        # PHOTO
         elif post.post_type == "photo":
+            cap = f"👁 <b>ПРЕДПРОСМОТР</b>\n\n{post.caption or ''}"
             await callback.message.answer_photo(
                 photo=post.file_id,
-                caption=f"👁 <b>ПРЕДПРОСМОТР</b>\n\n{post.caption or ''}",
+                caption=repair_telegram_html(cap),
                 parse_mode="HTML",
             )
+
+        # VIDEO
         elif post.post_type == "video":
+            cap = f"👁 <b>ПРЕДПРОСМОТР</b>\n\n{post.caption or ''}"
             await callback.message.answer_video(
                 video=post.file_id,
-                caption=f"👁 <b>ПРЕДПРОСМОТР</b>\n\n{post.caption or ''}",
+                caption=repair_telegram_html(cap),
                 parse_mode="HTML",
             )
+
+        # VIDEO NOTE
         elif post.post_type == "video_note":
             await callback.message.answer_video_note(video_note=post.file_id)
+
+        # AUDIO
         elif post.post_type == "audio":
+            cap = f"👁 <b>ПРЕДПРОСМОТР</b>\n\n{post.caption or ''}"
             await callback.message.answer_audio(
                 audio=post.file_id,
-                caption=f"👁 <b>ПРЕДПРОСМОТР</b>\n\n{post.caption or ''}",
+                caption=repair_telegram_html(cap),
                 parse_mode="HTML",
             )
+
+        # DOCUMENT
         elif post.post_type == "document":
+            cap = f"👁 <b>ПРЕДПРОСМОТР</b>\n\n{post.caption or ''}"
             await callback.message.answer_document(
                 document=post.file_id,
-                caption=f"👁 <b>ПРЕДПРОСМОТР</b>\n\n{post.caption or ''}",
+                caption=repair_telegram_html(cap),
                 parse_mode="HTML",
             )
+
+        # VOICE
         elif post.post_type == "voice":
+            cap = f"👁 <b>ПРЕДПРОСМОТР</b>\n\n{post.caption or ''}"
             await callback.message.answer_voice(
                 voice=post.file_id,
-                caption=f"👁 <b>ПРЕДПРОСМОТР</b>\n\n{post.caption or ''}",
+                caption=repair_telegram_html(cap),
                 parse_mode="HTML",
             )
+
+        # LINK
         elif post.post_type == "link":
-            buttons = post.buttons
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=buttons["inline"][0][0]["text"],
-                            url=buttons["inline"][0][0]["url"],
-                        )
-                    ]
-                ]
-            )
-            await callback.message.answer(
-                f"👁 <b>ПРЕДПРОСМОТР:</b>\n\n{post.content}",
+            buttons = post.buttons or {}
+            try:
+                btn = buttons["inline"][0][0]
+                keyboard = InlineKeyboardMarkup(
+                    inline_keyboard=[[InlineKeyboardButton(text=btn["text"], url=btn["url"])]]
+                )
+            except Exception:
+                keyboard = None
+
+            await safe_answer_html(
+                callback.message,
+                f"👁 <b>ПРЕДПРОСМОТР:</b>\n\n{post.content or ''}",
                 reply_markup=keyboard,
-                parse_mode="HTML",
+                disable_web_page_preview=True,
             )
+        elif post.post_type == "survey":
+            if post.survey_id:
+                survey_result = await session.execute(
+                    select(Survey).where(Survey.survey_id == post.survey_id)
+                )
+                survey = survey_result.scalar_one_or_none()
+                
+                if survey:
+                    from config import config
+                    bot_username = config.BOT_USERNAME
+                    
+                    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text=survey.button_text,
+                            url=f"https://t.me/{bot_username}?start=survey_{survey.survey_id}"
+                        )]
+                    ])
+                    
+                    await callback.message.answer(
+                        f"👁 <b>ПРЕДПРОСМОТР АНКЕТЫ:</b>\n\n"
+                        f"📋 {survey.name}\n\n"
+                        f"Нажмите кнопку для заполнения:",
+                        reply_markup=keyboard,
+                        parse_mode="HTML"
+                    )
+                else:
+                    await callback.answer("❌ Анкета не найдена", show_alert=True)
+                    return
+            else:
+                await callback.answer("❌ Анкета не привязана к посту", show_alert=True)
+                return
 
         await callback.message.answer(
             "🎛 <b>Действия с постом:</b>",
@@ -712,9 +871,11 @@ async def view_post(callback: CallbackQuery, session: AsyncSession):
             parse_mode="HTML",
         )
         await callback.answer("✅ Предпросмотр отправлен")
+    
+    
+
     except Exception as e:
         await callback.answer(f"❌ Ошибка: {str(e)}", show_alert=True)
-
 
 @router.callback_query(F.data.startswith("post:edit:"))
 async def edit_post_menu(callback: CallbackQuery, session: AsyncSession):
@@ -817,6 +978,12 @@ async def edit_post_content_start(callback: CallbackQuery, state: FSMContext, se
             f"🖼 <b>Изменение {post.post_type}</b>\n\nОтправьте новый файл:",
             parse_mode="HTML",
         )
+    elif post.post_type == "link":
+        await callback.message.edit_text(
+            "🔗 <b>Изменение текста ссылки</b>\n\n"
+            "Отправьте новый текст сообщения (HTML поддерживается):",
+            parse_mode="HTML",
+        )
 
     await callback.answer()
 
@@ -865,6 +1032,15 @@ async def edit_post_content_save(message: Message, state: FSMContext, session: A
             post.caption = message.caption
             await session.commit()
             await message.answer("✅ Аудио изменено!", reply_markup=get_admin_main_keyboard())
+
+    elif post_type == "link":
+        post.content = message.text
+        await session.commit()
+        await message.answer(
+            "✅ Текст ссылки изменён!",
+            reply_markup=get_admin_main_keyboard(),
+            parse_mode="HTML",
+        )
 
     await state.clear()
 
@@ -1121,7 +1297,41 @@ async def add_post_delay(message: Message, state: FSMContext, session: AsyncSess
         return
 
     data = await state.get_data()
-
+    post_type = data.get("post_type")
+    
+    # Survey uchun
+    if post_type == "survey":
+        survey_id = data.get("survey_id")
+        
+        new_post = SchedulePost(
+            day_number=0,
+            post_type="survey",
+            survey_id=survey_id,
+            delay_seconds=delay,
+            order_number=await get_next_order(session, 0),
+        )
+        session.add(new_post)
+        await session.commit()
+        
+        # Survey nomini olish
+        survey_result = await session.execute(
+            select(Survey).where(Survey.survey_id == survey_id)
+        )
+        survey = survey_result.scalar_one_or_none()
+        survey_name = survey.name if survey else "Анкета"
+        
+        await message.answer(
+            f"✅ <b>Анкета добавлена в День запуска!</b>\n\n"
+            f"⏱ Задержка: {delay} секунд\n"
+            f"📋 Анкета: {survey_name}\n"
+            f"🔢 Порядок: {new_post.order_number}",
+            reply_markup=get_admin_main_keyboard(),
+            parse_mode="HTML"
+        )
+        await state.clear()
+        return
+    
+    # Existing code for other post types (link, etc)
     buttons = data.get("buttons")
 
     new_post = SchedulePost(
@@ -1143,6 +1353,6 @@ async def add_post_delay(message: Message, state: FSMContext, session: AsyncSess
         f"📝 Тип: {data['post_type']}\n"
         f"🔢 Порядок: {new_post.order_number}",
         reply_markup=get_admin_main_keyboard(),
-        parse_mode="HTML",
+        parse_mode="HTML"
     )
     await state.clear()

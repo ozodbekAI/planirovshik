@@ -1,8 +1,8 @@
 """news
 
-Revision ID: 31b7326c6ad4
+Revision ID: 93aed790cf2c
 Revises: 
-Create Date: 2025-11-12 21:17:14.371251
+Create Date: 2026-01-07 18:46:33.265795
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '31b7326c6ad4'
+revision: str = '93aed790cf2c'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -33,6 +33,17 @@ def upgrade() -> None:
     sa.Column('setting_value', sa.Text(), nullable=True),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
     sa.PrimaryKeyConstraint('setting_key')
+    )
+    op.create_table('surveys',
+    sa.Column('survey_id', sa.Integer(), autoincrement=True, nullable=False),
+    sa.Column('name', sa.String(length=255), nullable=False),
+    sa.Column('title', sa.String(length=255), nullable=False),
+    sa.Column('button_text', sa.String(length=100), nullable=False),
+    sa.Column('message_text', sa.Text(), nullable=True),
+    sa.Column('completion_message', sa.Text(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('is_active', sa.Boolean(), nullable=False),
+    sa.PrimaryKeyConstraint('survey_id')
     )
     op.create_table('users',
     sa.Column('user_id', sa.BigInteger(), nullable=False),
@@ -62,11 +73,46 @@ def upgrade() -> None:
     sa.Column('delay_seconds', sa.Integer(), nullable=False),
     sa.Column('buttons', sa.JSON(), nullable=True),
     sa.Column('order_number', sa.Integer(), nullable=False),
+    sa.Column('survey_id', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['day_number'], ['schedule_days.day_number'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['survey_id'], ['surveys.survey_id'], ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('post_id')
     )
     op.create_index('idx_post_day', 'schedule_posts', ['day_number'], unique=False)
     op.create_index('idx_post_delay', 'schedule_posts', ['delay_seconds'], unique=False)
+    op.create_table('survey_questions',
+    sa.Column('question_id', sa.Integer(), autoincrement=True, nullable=False),
+    sa.Column('survey_id', sa.Integer(), nullable=False),
+    sa.Column('question_text', sa.Text(), nullable=False),
+    sa.Column('question_type', sa.String(length=50), nullable=False),
+    sa.Column('options', sa.JSON(), nullable=True),
+    sa.Column('order_number', sa.Integer(), nullable=False),
+    sa.Column('is_required', sa.Boolean(), nullable=False),
+    sa.ForeignKeyConstraint(['survey_id'], ['surveys.survey_id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('question_id')
+    )
+    op.create_table('survey_responses',
+    sa.Column('response_id', sa.Integer(), autoincrement=True, nullable=False),
+    sa.Column('user_id', sa.BigInteger(), nullable=False),
+    sa.Column('survey_id', sa.Integer(), nullable=False),
+    sa.Column('started_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('completed_at', sa.DateTime(), nullable=True),
+    sa.Column('is_completed', sa.Boolean(), nullable=False),
+    sa.Column('current_question', sa.Integer(), nullable=False),
+    sa.ForeignKeyConstraint(['survey_id'], ['surveys.survey_id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['user_id'], ['users.user_id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('response_id')
+    )
+    op.create_table('survey_answers',
+    sa.Column('answer_id', sa.Integer(), autoincrement=True, nullable=False),
+    sa.Column('response_id', sa.Integer(), nullable=False),
+    sa.Column('question_id', sa.Integer(), nullable=False),
+    sa.Column('answer_text', sa.Text(), nullable=True),
+    sa.Column('answered_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['question_id'], ['survey_questions.question_id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['response_id'], ['survey_responses.response_id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('answer_id')
+    )
     op.create_table('user_progress',
     sa.Column('progress_id', sa.Integer(), autoincrement=True, nullable=False),
     sa.Column('user_id', sa.BigInteger(), nullable=False),
@@ -87,6 +133,9 @@ def downgrade() -> None:
     op.drop_index('idx_progress_user', table_name='user_progress')
     op.drop_index('idx_progress_post', table_name='user_progress')
     op.drop_table('user_progress')
+    op.drop_table('survey_answers')
+    op.drop_table('survey_responses')
+    op.drop_table('survey_questions')
     op.drop_index('idx_post_delay', table_name='schedule_posts')
     op.drop_index('idx_post_day', table_name='schedule_posts')
     op.drop_table('schedule_posts')
@@ -94,6 +143,7 @@ def downgrade() -> None:
     op.drop_index('idx_user_day', table_name='users')
     op.drop_index('idx_user_active', table_name='users')
     op.drop_table('users')
+    op.drop_table('surveys')
     op.drop_table('settings')
     op.drop_table('schedule_days')
     # ### end Alembic commands ###

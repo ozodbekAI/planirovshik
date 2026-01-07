@@ -26,7 +26,7 @@ target_metadata = Base.metadata
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
 
-config.set_main_option("sqlalchemy.url", "postgresql+psycopg://postgres:postgres@localhost:5432/plan")
+config.set_main_option("sqlalchemy.url", "postgresql+psycopg2://postgres:postgres@localhost:5432/plan")
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.

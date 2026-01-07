@@ -1,12 +1,14 @@
-# handlers/user.py
+# handlers/user.py - UPDATED VERSION
 import asyncio
 from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from database.base import User
+from handlers.survey import send_survey_intro
 from keyboards.user_kb import get_subscribe_keyboard
 from services.tgtrack import TgTrackService
 from utils.texts import Texts
@@ -18,11 +20,33 @@ router = Router()
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, session: AsyncSession):
+async def cmd_start(message: Message, session: AsyncSession, state: FSMContext):
+    """
+    /start komandasi - deep link bilan anketalarni qo'llab-quvvatlaydi
+    /start survey_123 - survey ID 123 ni ochadi
+    """
+    await TgTrackService.send_start_to_tgtrack(message)
+
     user_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name or "Друг"
 
+    # Deep link parametrini tekshirish
+    command_args = message.text.split(maxsplit=1)
+    
+    # Survey deep link
+    if len(command_args) > 1 and command_args[1].startswith("survey_"):
+        try:
+            survey_id = int(command_args[1].replace("survey_", ""))
+            
+            
+            # Survey boshlash
+            await send_survey_intro(message, survey_id, state, session)
+            return
+        except ValueError:
+            pass  # Invalid survey ID, continue with normal flow
+
+    # Oddiy /start flow
     result = await session.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()
 
@@ -63,6 +87,9 @@ async def cmd_start(message: Message, session: AsyncSession):
             reply_markup=get_subscribe_keyboard(),
             parse_mode="HTML",
         )
+    else:
+        scheduler = SchedulerTasks(message.bot)
+        asyncio.create_task(scheduler.send_launch_sequence(message.bot, session, user))
 
 
 @router.callback_query(F.data == "check_subscription")

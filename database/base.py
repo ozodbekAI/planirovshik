@@ -1,4 +1,4 @@
-# database/models.py
+# database/models.py - UPDATED
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import (
@@ -39,7 +39,7 @@ class ScheduleDay(Base):
     
     day_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     day_number: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
-    day_type: Mapped[int] = mapped_column(SmallInteger, default=1, nullable=False)  # 0=launch
+    day_type: Mapped[int] = mapped_column(SmallInteger, default=1, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     posts = relationship("SchedulePost", back_populates="day", cascade="all, delete-orphan")
@@ -57,9 +57,16 @@ class SchedulePost(Base):
     delay_seconds: Mapped[int] = mapped_column(Integer, default=0)
     buttons: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     order_number: Mapped[int] = mapped_column(Integer, default=0)
+
+    survey_id: Mapped[Optional[int]] = mapped_column(
+        Integer, 
+        ForeignKey("surveys.survey_id", ondelete="SET NULL"), 
+        nullable=True
+    )
     
     day = relationship("ScheduleDay", back_populates="posts")
     progress = relationship("UserProgress", back_populates="post", cascade="all, delete-orphan")
+    survey = relationship("Survey")
     
     __table_args__ = (
         Index('idx_post_day', 'day_number'),
@@ -89,3 +96,70 @@ class Setting(Base):
     setting_key: Mapped[str] = mapped_column(String(255), primary_key=True)
     setting_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+class Survey(Base):
+    __tablename__ = "surveys"
+
+    survey_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    button_text: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    message_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    message_photo_file_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    completion_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    completion_photo_file_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    questions = relationship("SurveyQuestion", back_populates="survey", cascade="all, delete-orphan")
+    responses = relationship("SurveyResponse", back_populates="survey", cascade="all, delete-orphan")
+
+
+
+class SurveyQuestion(Base):
+    """Vopros (Question) model"""
+    __tablename__ = "survey_questions"
+    
+    question_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    survey_id: Mapped[int] = mapped_column(Integer, ForeignKey("surveys.survey_id", ondelete="CASCADE"))
+    question_text: Mapped[str] = mapped_column(Text, nullable=False)
+    question_type: Mapped[str] = mapped_column(String(50), default="text")
+    options: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    order_number: Mapped[int] = mapped_column(Integer, default=0)
+    is_required: Mapped[bool] = mapped_column(Boolean, default=True)
+    
+    survey = relationship("Survey", back_populates="questions")
+    answers = relationship("SurveyAnswer", back_populates="question", cascade="all, delete-orphan")
+
+
+class SurveyResponse(Base):
+    """User survey response tracking"""
+    __tablename__ = "survey_responses"
+    
+    response_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"))
+    survey_id: Mapped[int] = mapped_column(Integer, ForeignKey("surveys.survey_id", ondelete="CASCADE"))
+    started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    is_completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    current_question: Mapped[int] = mapped_column(Integer, default=0)
+    
+    user = relationship("User")
+    survey = relationship("Survey", back_populates="responses")
+    answers = relationship("SurveyAnswer", back_populates="response", cascade="all, delete-orphan")
+
+
+class SurveyAnswer(Base):
+    """Individual answers to survey questions"""
+    __tablename__ = "survey_answers"
+    
+    answer_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    response_id: Mapped[int] = mapped_column(Integer, ForeignKey("survey_responses.response_id", ondelete="CASCADE"))
+    question_id: Mapped[int] = mapped_column(Integer, ForeignKey("survey_questions.question_id", ondelete="CASCADE"))
+    answer_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    answered_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    
+    response = relationship("SurveyResponse", back_populates="answers")
+    question = relationship("SurveyQuestion", back_populates="answers")

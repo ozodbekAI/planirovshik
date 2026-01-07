@@ -1,3 +1,4 @@
+import re
 from typing import Optional
 from datetime import datetime, timedelta
 from aiogram import Bot
@@ -31,6 +32,9 @@ def truncate_text(text: str, max_length: int = 30) -> str:
     if len(text) <= max_length:
         return text
     return text[:max_length-3] + "..."
+
+def strip_html(text: str) -> str:
+    return re.sub(r"<[^>]*>", "", text or "")
 
 def format_moscow_time(time_str: str) -> str:
     """

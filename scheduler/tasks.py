@@ -1,4 +1,4 @@
-# scheduler/tasks.py
+# scheduler/tasks.py - UPDATED WITH PROPER SURVEY MESSAGE
 import asyncio
 from datetime import datetime, timedelta
 from aiogram import Bot
@@ -6,16 +6,17 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.base import User, SchedulePost, UserProgress, ScheduleDay
+from database.base import User, SchedulePost, UserProgress, ScheduleDay, Survey
 from utils.helpers import format_moscow_time
+from config import config
 
 
 class SchedulerTasks:
     def __init__(self, bot: Bot):
         self.bot = bot
 
-    async def _send_post(self, bot: Bot, user_id: int, post: SchedulePost) -> bool:
-        """Bitta postni yuborish"""
+    async def _send_post(self, bot: Bot, user_id: int, post: SchedulePost, session: AsyncSession) -> bool:
+        """Bitta postni yuborish (UPDATED SURVEY HANDLING)"""
         try:
             media_types = ["photo", "video", "video_note", "audio", "document", "voice"]
 
@@ -78,7 +79,6 @@ class SchedulerTasks:
                     return False
 
                 if post.buttons and "inline" in post.buttons:
-                    # buttons["inline"] = [[{"text": "...", "url": "..."}], [...]]
                     inline_rows = []
                     for row in post.buttons["inline"]:
                         inline_row = [
@@ -90,6 +90,52 @@ class SchedulerTasks:
                     await bot.send_message(user_id, post.content, reply_markup=kb, parse_mode="HTML")
                 else:
                     await bot.send_message(user_id, post.content, parse_mode="HTML")
+
+            # ============== SURVEY HANDLING - UPDATED ==============
+            elif post.post_type == "survey":
+                if not post.survey_id:
+                    print(f"⚠️ Warning: Post {post.post_id} (type: survey) has no survey_id - skipping")
+                    return False
+
+                survey_result = await session.execute(
+                    select(Survey).where(Survey.survey_id == post.survey_id)
+                )
+                survey = survey_result.scalar_one_or_none()
+
+                if not survey or not survey.is_active:
+                    print(f"⚠️ Warning: Survey {post.survey_id} not found or inactive - skipping")
+                    return False
+
+                bot_info = await bot.get_me()
+                bot_username = bot_info.username
+
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text=survey.button_text,
+                        url=f"https://t.me/{bot_username}?start=survey_{survey.survey_id}"
+                    )]
+                ])
+
+                text = survey.message_text or "📋 Заполните анкету"
+
+                # ✅ NEW: agar intro rasm bo‘lsa — photo + caption + knopka
+                if survey.message_photo_file_id:
+                    await bot.send_photo(
+                        user_id,
+                        survey.message_photo_file_id,
+                        caption=text,
+                        reply_markup=keyboard,
+                        parse_mode="HTML"
+                    )
+                else:
+                    await bot.send_message(
+                        user_id,
+                        text,
+                        reply_markup=keyboard,
+                        parse_mode="HTML"
+                    )
+
+                print(f"📋 Survey {survey.survey_id} sent to user {user_id}")
 
             else:
                 print(f"⚠️ Unknown post type: {post.post_type} for post {post.post_id}")
@@ -105,10 +151,8 @@ class SchedulerTasks:
         """
         Day 0 postlarni ketma-ket yuborish.
         /start + подписка tasdiqlangandan keyin chaqiriladi.
-        delay_seconds – HAR BIR post uchun, uni yuborishdan OLDIN kutish vaqti.
         """
         if user.first_message_sent:
-            # Allaqachon ishga tushgan bo‘lsa – takrorlamaymiz
             return
 
         posts_result = await session.execute(
@@ -128,13 +172,12 @@ class SchedulerTasks:
         print(f"📤 Starting launch sequence for user {user.user_id}")
 
         for post in posts:
-            # HAR BIR post uchun o‘z delay'ini hurmat qilamiz
             delay = post.delay_seconds or 0
             if delay > 0:
                 print(f"⏳ Waiting {delay} seconds before sending post {post.post_id}")
                 await asyncio.sleep(delay)
 
-            success = await self._send_post(bot, user.user_id, post)
+            success = await self._send_post(bot, user.user_id, post, session)
 
             if success:
                 session.add(
@@ -146,7 +189,6 @@ class SchedulerTasks:
                 )
                 print(f"✅ Post {post.post_id} sent to user {user.user_id}")
 
-            # subscription_check'ga yetganimizda – shu yerda to‘xtaymiz
             if post.post_type == "subscription_check":
                 user.subscription_checked = True
                 await session.commit()
@@ -157,19 +199,17 @@ class SchedulerTasks:
 
     async def send_remaining_launch_posts(self, bot: Bot, session: AsyncSession, user: User):
         """
-        Obuna tasdiqlangandan keyin Day 0 bo‘yicha qolgan postlarni yuborish.
+        Obuna tasdiqlangandan keyin Day 0 bo'yicha qolgan postlarni yuborish.
         """
         if not user.subscription_checked:
             print(f"⚠️ User {user.user_id} subscription not checked yet")
             return
 
-        # Userga allaqachon yuborilgan postlar
         sent_posts = await session.execute(
             select(UserProgress.post_id).where(UserProgress.user_id == user.user_id)
         )
         sent_ids = {row[0] for row in sent_posts.all()}
 
-        # Day 0 dagi barcha postlarni olish
         posts_result = await session.execute(
             select(SchedulePost)
             .where(SchedulePost.day_number == 0)
@@ -177,7 +217,6 @@ class SchedulerTasks:
         )
         posts = posts_result.scalars().all()
 
-        # subscription_check dan KEYINGI postlarni yig‘amiz
         started = False
         remaining_posts = []
 
@@ -202,7 +241,7 @@ class SchedulerTasks:
                 print(f"⏳ Waiting {delay} seconds before sending post {post.post_id}")
                 await asyncio.sleep(delay)
 
-            success = await self._send_post(bot, user.user_id, post)
+            success = await self._send_post(bot, user.user_id, post, session)
 
             if success:
                 session.add(
@@ -218,8 +257,7 @@ class SchedulerTasks:
 
     async def send_scheduled_posts(self, session: AsyncSession):
         """
-        Oddiy kunlar (day 1+) uchun HH:MM bo‘yicha postlarni yuborish.
-        Har minutda scheduler orqali chaqiriladi.
+        Oddiy kunlar (day 1+) uchun HH:MM bo'yicha postlarni yuborish.
         """
         now = datetime.now().strftime("%H:%M")
         moscow_now = format_moscow_time(now)
@@ -228,7 +266,7 @@ class SchedulerTasks:
             select(SchedulePost)
             .join(ScheduleDay)
             .where(
-                ScheduleDay.day_type > 0,  # Faqat oddiy kunlar (Day > 0)
+                ScheduleDay.day_type > 0,
                 SchedulePost.time == moscow_now,
             )
         )
@@ -258,7 +296,7 @@ class SchedulerTasks:
                 if exists.scalar():
                     continue
 
-                success = await self._send_post(self.bot, user.user_id, post)
+                success = await self._send_post(self.bot, user.user_id, post, session)
 
                 if success:
                     session.add(
@@ -294,7 +332,7 @@ class SchedulerTasks:
 
     async def cleanup_old_progress(self, session: AsyncSession):
         """
-        30 kundan eski progress yozuvlarini o‘chirish.
+        30 kundan eski progress yozuvlarini o'chirish.
         """
         thirty_days_ago = datetime.now() - timedelta(days=30)
 
@@ -312,12 +350,6 @@ class SchedulerTasks:
     async def check_launch_users(self, session: AsyncSession):
         """
         Day 0 sequence'ni ishga tushirish uchun userlarni tekshirish.
-        Endi faqat:
-        - current_day == 0
-        - is_subscribed == True
-        - subscription_checked == True
-        - first_message_sent == False
-        bo‘lganlarga ishlaydi.
         """
         users_result = await session.execute(
             select(User).where(

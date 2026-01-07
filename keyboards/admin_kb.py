@@ -1,10 +1,12 @@
+# keyboards/admin_kb.py - UPDATED VERSION
+
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from typing import List, Dict
 
 
 def get_admin_main_keyboard() -> InlineKeyboardMarkup:
-    """Admin asosiy menyu"""
+    """Admin asosiy menyu - UPDATED"""
     builder = InlineKeyboardBuilder()
     
     builder.row(
@@ -12,6 +14,9 @@ def get_admin_main_keyboard() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="📅 Расписание", callback_data="admin:schedule")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📋 Анкеты", callback_data="admin:surveys")  # NEW
     )
     builder.row(
         InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")
@@ -26,16 +31,71 @@ def get_admin_main_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def get_post_type_keyboard() -> InlineKeyboardMarkup:
+    """Post turi tanlash klaviaturasi - UPDATED"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(
+        InlineKeyboardButton(text="📝 Текст", callback_data="posttype:text")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🖼 Фото", callback_data="posttype:photo"),
+        InlineKeyboardButton(text="🎥 Видео", callback_data="posttype:video")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📄 Документ", callback_data="posttype:document"),
+        InlineKeyboardButton(text="🎵 Аудио", callback_data="posttype:audio")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🎤 Голосовое", callback_data="posttype:voice"),
+        InlineKeyboardButton(text="⭕ Кружок", callback_data="posttype:video_note")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔗 Ссылка", callback_data="posttype:link")
+    )
+    builder.row(
+        InlineKeyboardButton(text="✅ Проверка подписки", callback_data="posttype:subscription_check")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📋 Анкета", callback_data="posttype:survey")  # NEW
+    )
+    builder.row(
+        InlineKeyboardButton(text="❌ Отмена", callback_data="admin:main")
+    )
+    
+    return builder.as_markup()
+
+
+def get_survey_selection_keyboard(surveys: list, day_number: int) -> InlineKeyboardMarkup:
+    """Anketa tanlash uchun klaviatura"""
+    builder = InlineKeyboardBuilder()
+    
+    for survey in surveys:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"📋 {survey.name}",
+                callback_data=f"select_survey:{survey.survey_id}:{day_number}"
+            )
+        )
+    
+    if day_number == 0:
+        builder.row(
+            InlineKeyboardButton(text="⬅️ Отмена", callback_data="launch:view")
+        )
+    else:
+        builder.row(
+            InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"schedule:day:{day_number}")
+        )
+    
+    return builder.as_markup()
+
+
+# Keep all other functions from the original file...
 def get_launch_day_keyboard(posts: list) -> InlineKeyboardMarkup:
-    """
-    Клавиатура для Дня запуска:
-    1) сверху – настройки Welcome/подписки,
-    2) ниже – список постов Day 0,
-    3) затем – «Добавить пост» и «Назад в меню».
-    """
+    """Клавиатура для Дня запуска"""
     builder = InlineKeyboardBuilder()
 
-    # --------- БЛОК НАСТРОЕК ---------
+    # Настройки
     builder.row(
         InlineKeyboardButton(
             text="✏️ Изменить Welcome сообщение",
@@ -61,17 +121,25 @@ def get_launch_day_keyboard(posts: list) -> InlineKeyboardMarkup:
         )
     )
 
-    # --------- СПИСОК ПОСТОВ ДНЯ ЗАПУСКА ---------
+    # Список постов
     for i, post in enumerate(posts, 1):
         delay_text = f"{post.delay_seconds}s" if post.delay_seconds else "0s"
+        post_type_emoji = {
+            "text": "📝",
+            "photo": "🖼",
+            "video": "🎥",
+            "survey": "📋",  # NEW
+            "subscription_check": "✅",
+            "link": "🔗",
+        }.get(post.post_type, "📄")
+        
         builder.row(
             InlineKeyboardButton(
-                text=f"{i}. {post.post_type} ({delay_text})",
+                text=f"{i}. {post_type_emoji} {post.post_type} ({delay_text})",
                 callback_data=f"post:view:{post.post_id}"
             )
         )
 
-    # --------- УПРАВЛЕНИЕ ДНЁМ ЗАПУСКА ---------
     builder.row(
         InlineKeyboardButton(text="➕ Добавить пост", callback_data="post:add:launch")
     )
@@ -113,7 +181,7 @@ def get_day_management_keyboard(day_number: int, posts_data: List[Dict]) -> Inli
         post_type_emoji = {
             'text': '📝', 'photo': '🖼', 'video': '🎥',
             'video_note': '⭕', 'audio': '🎵', 'document': '📄',
-            'link': '🔗', 'voice': '🎤'
+            'link': '🔗', 'voice': '🎤', 'survey': '📋'  # NEW
         }.get(post['post_type'], '📄')
         
         builder.row(
@@ -129,38 +197,6 @@ def get_day_management_keyboard(day_number: int, posts_data: List[Dict]) -> Inli
     builder.row(
         InlineKeyboardButton(text="🗑 Удалить день", callback_data=f"day:delete:{day_number}"),
         InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:schedule")
-    )
-    
-    return builder.as_markup()
-
-
-def get_post_type_keyboard() -> InlineKeyboardMarkup:
-    """Post turi tanlash klaviaturasi"""
-    builder = InlineKeyboardBuilder()
-    
-    builder.row(
-        InlineKeyboardButton(text="📝 Текст", callback_data="posttype:text")
-    )
-    builder.row(
-        InlineKeyboardButton(text="🖼 Фото", callback_data="posttype:photo"),
-        InlineKeyboardButton(text="🎥 Видео", callback_data="posttype:video")
-    )
-    builder.row(
-        InlineKeyboardButton(text="📄 Документ", callback_data="posttype:document"),
-        InlineKeyboardButton(text="🎵 Аудио", callback_data="posttype:audio")
-    )
-    builder.row(
-        InlineKeyboardButton(text="🎤 Голосовое", callback_data="posttype:voice"),
-        InlineKeyboardButton(text="⭕ Кружок", callback_data="posttype:video_note")
-    )
-    builder.row(
-        InlineKeyboardButton(text="🔗 Ссылка", callback_data="posttype:link")
-    )
-    builder.row(
-        InlineKeyboardButton(text="✅ Проверка подписки", callback_data="posttype:subscription_check")
-    )
-    builder.row(
-        InlineKeyboardButton(text="❌ Отмена", callback_data="admin:main")
     )
     
     return builder.as_markup()
@@ -202,9 +238,11 @@ def get_edit_post_keyboard(post_id: int, post_type: str, day_number: int) -> Inl
             InlineKeyboardButton(text="⏰ Изменить время", callback_data=f"post:edit_time:{post_id}")
         )
     
-    builder.row(
-        InlineKeyboardButton(text="📝 Изменить контент", callback_data=f"post:edit_content:{post_id}")
-    )
+    # Survey uchun content o'zgartirish kerак emas
+    if post_type != "survey":
+        builder.row(
+            InlineKeyboardButton(text="📝 Изменить контент", callback_data=f"post:edit_content:{post_id}")
+        )
     
     if day_number == 0:
         builder.row(
@@ -236,34 +274,6 @@ def get_stats_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_broadcast_keyboard() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="📢 Всем пользователям", callback_data="broadcast:all")
-    )
-    builder.row(
-        InlineKeyboardButton(text="✅ Только подписанным", callback_data="broadcast:subscribed")
-    )
-    builder.row(
-        InlineKeyboardButton(text="👥 Активным за 24ч", callback_data="broadcast:active_24h")
-    )
-    builder.row(
-        InlineKeyboardButton(text="❌ Отмена", callback_data="admin:main")
-    )
-    return builder.as_markup()
-
-
-def get_broadcast_confirm_keyboard(broadcast_type: str) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"broadcast:confirm:{broadcast_type}")
-    )
-    builder.row(
-        InlineKeyboardButton(text="❌ Отмена", callback_data="admin:broadcast")
-    )
-    return builder.as_markup()
-
-
 def get_broadcast_type_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -277,6 +287,9 @@ def get_broadcast_type_keyboard() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="📄 Документ", callback_data="broadcast:type:document")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📋 Анкета", callback_data="broadcast:type:survey")
     )
     builder.row(
         InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="admin:main")

@@ -11,6 +11,9 @@ class Config:
         "postgresql+asyncpg://postgres:postgres@localhost:5432/plan"
     )
     
+    TGTRACK: str = os.getenv("TGTRACK")
+
+    BOT_USERNAME: str = os.getenv("BOT_USERNAME", "your_bot_username")
 
     CHANNEL_ID: str = os.getenv("CHANNEL_ID", "")
     CHANNEL_URL: str = os.getenv("CHANNEL_URL", "https://t.me/your_channel")
@@ -25,7 +28,7 @@ class Config:
     BOT_API_SERVER: str = os.getenv("BOT_API_SERVER", "https://api.telegram.org")
     USE_LOCAL_SERVER: bool = os.getenv("USE_LOCAL_SERVER", "false").lower() == "true"
 
-    TGRACK: str
+
     
     def validate(self):
         if not self.BOT_TOKEN:

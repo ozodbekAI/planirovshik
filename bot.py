@@ -12,7 +12,7 @@ from apscheduler.triggers.cron import CronTrigger
 from config import config
 from database import init_db, close_db, get_session  # get_session YANGI
 from middleware.db import DatabaseMiddleware
-from handlers import user, admin, stats, broadcast
+from handlers import user, admin, stats, broadcast, survey
 from scheduler.tasks import SchedulerTasks
 
 logging.basicConfig(
@@ -140,6 +140,7 @@ async def main():
     dp.include_router(admin.router)
     dp.include_router(stats.router)
     dp.include_router(broadcast.router)
+    dp.include_router(survey.router)
 
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
