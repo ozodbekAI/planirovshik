@@ -4,6 +4,7 @@ from typing import Optional
 from urllib.parse import quote
 
 from aiogram import Router, F
+from aiogram.filters import StateFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
@@ -574,13 +575,24 @@ async def lesson_add_post_start(callback: CallbackQuery, state: FSMContext, sess
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("lessonposttype:"))
-async def lesson_add_post_type(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+async def _handle_lesson_post_type(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    post_type: str,
+):
+    """Common handler for selecting lesson post type.
+
+    Supports both callback prefixes:
+      - lessonposttype:<type> (new)
+      - posttype:<type> (legacy)
+    """
+    post_type = (post_type or "").strip()
+
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа")
         return
 
-    post_type = callback.data.split(":", 1)[1]
     data = await state.get_data()
     lesson_id = data.get("lesson_id")
 
@@ -645,6 +657,23 @@ def _lesson_survey_selection_keyboard(surveys: list[Survey], lesson_id: int) -> 
     builder.row(InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"lpost:add:{lesson_id}"))
     return builder.as_markup()
 
+
+
+
+@router.callback_query(F.data.startswith("lessonposttype:"))
+async def lesson_add_post_type(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    post_type = callback.data.split(":", 1)[1]
+    await _handle_lesson_post_type(callback, state, session, post_type)
+
+
+@router.callback_query(StateFilter(AddLessonPost.waiting_type), F.data.startswith("posttype:"))
+async def lesson_add_post_type_legacy(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Legacy support: some keyboards may still send posttype:<type> callbacks.
+
+    We only accept it in lesson flow (AddLessonPost.waiting_type) to avoid clashes with schedule.
+    """
+    post_type = callback.data.split(":", 1)[1]
+    await _handle_lesson_post_type(callback, state, session, post_type)
 
 @router.callback_query(F.data.startswith("lesson_select_survey:"))
 async def lesson_select_survey(callback: CallbackQuery, state: FSMContext, session: AsyncSession):

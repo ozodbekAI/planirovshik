@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
@@ -399,7 +399,11 @@ async def add_post_time(message: Message, state: FSMContext):
 
     if not re.match(time_pattern, message.text):
         data = await state.get_data()
-        day_number = data["day_number"]
+        day_number = data.get("day_number")
+    if day_number is None:
+        # Not in schedule flow (e.g., lessons). Ignore to prevent crashes.
+        await callback.answer("❌ Неверный контекст", show_alert=True)
+        return
         back_kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="⬅️ Назад к дню", callback_data=f"schedule:day:{day_number}")],
@@ -519,7 +523,7 @@ async def select_survey_for_post(callback: CallbackQuery, state: FSMContext, ses
     
     await callback.answer()
 
-@router.callback_query(F.data.startswith("posttype:"))
+@router.callback_query(StateFilter(AddPost.waiting_type), F.data.startswith("posttype:"))
 async def add_post_type(callback: CallbackQuery, state: FSMContext):
     """Post turini tanlash"""
     post_type = callback.data.split(":")[1]
