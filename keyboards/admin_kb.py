@@ -19,6 +19,9 @@ def get_admin_main_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="📋 Анкеты", callback_data="admin:surveys")  # NEW
     )
     builder.row(
+        InlineKeyboardButton(text="📚 Уроки", callback_data="admin:lessons")
+    )
+    builder.row(
         InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")
     )
     builder.row(
@@ -28,6 +31,36 @@ def get_admin_main_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="❌ Закрыть", callback_data="admin:close")
     )
     
+    return builder.as_markup()
+
+
+def get_lesson_post_type_keyboard(back_callback: str = "admin:lessons") -> InlineKeyboardMarkup:
+    """Urok uchun post type tanlash klaviaturasi.
+
+    "Den" (schedule) dagi post turlari bilan bir xil qilib kengaytirilgan.
+    Callback prefix: lessonposttype:<type>
+    """
+    builder = InlineKeyboardBuilder()
+
+    builder.row(InlineKeyboardButton(text="📝 Текст", callback_data="lessonposttype:text"))
+    builder.row(
+        InlineKeyboardButton(text="🖼 Фото", callback_data="lessonposttype:photo"),
+        InlineKeyboardButton(text="🎥 Видео", callback_data="lessonposttype:video"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="📄 Документ", callback_data="lessonposttype:document"),
+        InlineKeyboardButton(text="🎵 Аудио", callback_data="lessonposttype:audio"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🎤 Голосовое", callback_data="lessonposttype:voice"),
+        InlineKeyboardButton(text="⭕ Кружок", callback_data="lessonposttype:video_note"),
+    )
+    builder.row(InlineKeyboardButton(text="🔗 Ссылка", callback_data="lessonposttype:link"))
+    builder.row(InlineKeyboardButton(text="✅ Проверка подписки", callback_data="lessonposttype:subscription_check"))
+    builder.row(InlineKeyboardButton(text="📋 Анкета", callback_data="lessonposttype:survey"))
+
+    builder.row(InlineKeyboardButton(text="❌ Отмена", callback_data=back_callback))
+
     return builder.as_markup()
 
 

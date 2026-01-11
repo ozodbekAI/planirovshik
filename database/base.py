@@ -163,3 +163,66 @@ class SurveyAnswer(Base):
     
     response = relationship("SurveyResponse", back_populates="answers")
     question = relationship("SurveyQuestion", back_populates="answers")
+
+
+# ===================== LESSONS / UROKI =====================
+
+
+class Lesson(Base):
+    """Uroki (lessons) uchun model.
+
+    Admin bitta urok yaratadi (name), so'ng unga bitta kontent biriktiriladi
+    (video yoki link). Userlar deep-link orqali urokni ochadi.
+    """
+
+    __tablename__ = "lessons"
+
+    lesson_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Kontent (SchedulePost'ga o'xshash)
+    post_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    file_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    caption: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    buttons: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Urok ichida bir nechta post bo'lishi mumkin (den/schedule postlari kabi)
+    posts = relationship("LessonPost", back_populates="lesson", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index('idx_lessons_active', 'is_active'),
+    )
+
+class LessonPost(Base):
+    """Urok ichidagi postlar (den/schedule postlari kabi)."""
+
+    __tablename__ = "lesson_posts"
+
+    post_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    lesson_id: Mapped[int] = mapped_column(Integer, ForeignKey("lessons.lesson_id", ondelete="CASCADE"), nullable=False)
+
+    post_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    file_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    caption: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    delay_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    buttons: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    order_number: Mapped[int] = mapped_column(Integer, default=0)
+
+    survey_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("surveys.survey_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    lesson = relationship("Lesson", back_populates="posts")
+    survey = relationship("Survey")
+
+    __table_args__ = (
+        Index('idx_lesson_posts_lesson', 'lesson_id'),
+        Index('idx_lesson_posts_order', 'lesson_id', 'order_number'),
+    )
