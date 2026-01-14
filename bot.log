@@ -22,3 +22,30 @@
 2026-01-11 17:31:43,672 - aiogram.event - INFO - Update id=579668988 is handled. Duration 268 ms by bot id=8247381561
 2026-01-11 17:31:44,674 - aiogram.event - INFO - Update id=579668989 is handled. Duration 346 ms by bot id=8247381561
 2026-01-11 17:31:45,579 - aiogram.event - INFO - Update id=579668990 is handled. Duration 348 ms by bot id=8247381561
+2026-01-14 19:17:00,486 - __main__ - INFO - Configuration validated
+2026-01-14 19:17:00,486 - __main__ - INFO - Timezone: Europe/Moscow
+2026-01-14 19:17:00,523 - __main__ - INFO - Database initialized
+2026-01-14 19:17:00,525 - apscheduler.scheduler - INFO - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-01-14 19:17:00,525 - apscheduler.scheduler - INFO - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-01-14 19:17:00,525 - apscheduler.scheduler - INFO - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-01-14 19:17:00,525 - apscheduler.scheduler - INFO - Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-01-14 19:17:00,526 - apscheduler.scheduler - INFO - Added job "check_launch_users_wrapper" to job store "default"
+2026-01-14 19:17:00,526 - apscheduler.scheduler - INFO - Added job "send_scheduled_posts_wrapper" to job store "default"
+2026-01-14 19:17:00,526 - apscheduler.scheduler - INFO - Added job "update_user_days_wrapper" to job store "default"
+2026-01-14 19:17:00,527 - apscheduler.scheduler - INFO - Added job "cleanup_old_progress_wrapper" to job store "default"
+2026-01-14 19:17:00,527 - apscheduler.scheduler - INFO - Scheduler started
+2026-01-14 19:17:00,527 - __main__ - INFO - Scheduler started
+2026-01-14 19:17:01,109 - __main__ - INFO - Bot started!
+2026-01-14 19:17:01,109 - aiogram.dispatcher - INFO - Start polling
+2026-01-14 19:17:01,220 - aiogram.dispatcher - INFO - Run polling for bot @pprojecttestmybot id=8247381561 - 'for_mytes'
+2026-01-14 19:17:05,966 - aiogram.event - INFO - Update id=579668992 is handled. Duration 362 ms by bot id=8247381561
+2026-01-14 19:17:08,263 - aiogram.event - INFO - Update id=579668993 is handled. Duration 347 ms by bot id=8247381561
+2026-01-14 19:17:09,217 - aiogram.event - INFO - Update id=579668994 is handled. Duration 268 ms by bot id=8247381561
+2026-01-14 19:17:23,906 - aiogram.event - INFO - Update id=579668995 is handled. Duration 442 ms by bot id=8247381561
+2026-01-14 19:17:24,932 - aiogram.event - INFO - Update id=579668996 is handled. Duration 264 ms by bot id=8247381561
+2026-01-14 19:17:29,460 - aiogram.event - INFO - Update id=579668997 is handled. Duration 185 ms by bot id=8247381561
+2026-01-14 19:17:30,527 - apscheduler.executors.default - INFO - Running job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2026-01-14 19:18:00 +05)" (scheduled at 2026-01-14 19:17:30.524893+05:00)
+2026-01-14 19:17:30,533 - apscheduler.executors.default - INFO - Job "check_launch_users_wrapper (trigger: interval[0:00:30], next run at: 2026-01-14 19:18:00 +05)" executed successfully
+2026-01-14 19:17:31,293 - aiogram.event - INFO - Update id=579668998 is handled. Duration 267 ms by bot id=8247381561
+2026-01-14 19:17:32,496 - aiogram.event - INFO - Update id=579668999 is handled. Duration 272 ms by bot id=8247381561
+2026-01-14 19:17:38,042 - aiogram.event - INFO - Update id=579669000 is handled. Duration 280 ms by bot id=8247381561

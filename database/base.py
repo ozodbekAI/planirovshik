@@ -110,6 +110,8 @@ class Survey(Base):
     completion_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     completion_photo_file_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
+    tgtrack_target: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 

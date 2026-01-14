@@ -25,6 +25,7 @@ class CreateSurvey(StatesGroup):
     waiting_name = State()
     waiting_button_text = State()
     waiting_message_text = State()
+    waiting_tgtrack_target = State() 
     waiting_intro_photo = State()          # ✅ NEW
     editing_questions = State()
     waiting_question_text = State()
@@ -44,6 +45,7 @@ class EditSurvey(StatesGroup):
     waiting_message_text = State()
     waiting_completion_message = State()
 
+    waiting_tgtrack_target = State()
     waiting_intro_photo = State()          # ✅ NEW
     waiting_completion_photo = State()
 
@@ -405,6 +407,7 @@ async def view_survey(callback: CallbackQuery, session: AsyncSession):
         f"📝 Название: {survey.name}\n"
         f"🔘 Кнопка: {survey.button_text}\n"
         f"💬 Текст сообщения:\n{truncate_text(survey.message_text or 'Не установлено', 100)}\n\n"
+        f"🎯 TGTrack цель: {survey.tgtrack_target or '— (не задано) —'}\n\n"
         f"❓ Вопросов: {len(questions)}\n\n"
         f"📊 <b>Статистика:</b>\n"
         f"✅ Завершено: {completed}\n"
@@ -711,6 +714,9 @@ async def edit_survey_menu(callback: CallbackQuery, session: AsyncSession):
         InlineKeyboardButton(text="💬 Изменить текст сообщения", callback_data=f"survey:edit_message:{survey_id}")
     )
     builder.row(
+        InlineKeyboardButton(text="🎯 Изменить TGTrack цель", callback_data=f"survey:edit_tgtrack:{survey_id}")
+    )
+    builder.row(
         InlineKeyboardButton(text="✅ Изменить сообщение завершения", callback_data=f"survey:edit_completion:{survey_id}")
     )
     builder.row(
@@ -731,6 +737,7 @@ async def edit_survey_menu(callback: CallbackQuery, session: AsyncSession):
         f"🔘 <b>Кнопка:</b> {survey.button_text}\n"
         f"💬 <b>Текст сообщения:</b>\n{truncate_text(survey.message_text or 'Не установлено', 100)}\n"
         f"✅ <b>Сообщение завершения:</b>\n{truncate_text(survey.completion_message or 'Не установлено', 100)}\n\n"
+        f"🎯 <b>TGTrack цель:</b> {survey.tgtrack_target or '— (не задано) —'}\n"
         f"🖼 <b>Интро-фото:</b> {intro_status}\n"
         f"🖼 <b>Фото завершения:</b> {completion_status}\n"
         f"Выберите, что хотите изменить:",
@@ -772,6 +779,50 @@ async def edit_intro_photo_start(callback: CallbackQuery, state: FSMContext, ses
         parse_mode="HTML"
     )
     await callback.answer()
+
+@router.callback_query(F.data.startswith("survey:edit_tgtrack:"))
+async def edit_survey_tgtrack_start(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    survey_id = int(callback.data.split(":")[2])
+    result = await session.execute(select(Survey).where(Survey.survey_id == survey_id))
+    survey = result.scalar_one_or_none()
+    if not survey:
+        await callback.answer("❌ Анкета не найдена")
+        return
+
+    await state.update_data(survey_id=survey_id)
+    await state.set_state(EditSurvey.waiting_tgtrack_target)
+
+    current = survey.tgtrack_target or "— (не задано) —"
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Очистить", callback_data=f"survey:edit_tgtrack_clear:{survey_id}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"survey:edit_survey:{survey_id}")]
+        ]
+    )
+
+    await callback.message.edit_text(
+        "🎯 <b>ИЗМЕНЕНИЕ TGTRACK ЦЕЛИ</b>\n\n"
+        f"Текущая цель: <code>{current}</code>\n\n"
+        "Введите новое значение цели (или нажмите «Очистить»):",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("survey:edit_tgtrack_clear:"))
+async def edit_survey_tgtrack_clear(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    survey_id = int(callback.data.split(":")[2])
+    result = await session.execute(select(Survey).where(Survey.survey_id == survey_id))
+    survey = result.scalar_one_or_none()
+    if not survey:
+        await callback.answer("❌ Анкета не найдена")
+        return
+
+    survey.tgtrack_target = None
+    await session.commit()
+
+    await callback.answer("✅ Очищено", show_alert=True)
+    await edit_survey_menu(callback, session)
 
 @router.callback_query(F.data.startswith("survey:intro_photo:remove:"))
 async def remove_intro_photo(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
@@ -1071,32 +1122,86 @@ async def edit_survey_message_start(callback: CallbackQuery, state: FSMContext, 
     await callback.answer()
 
 
-@router.message(EditSurvey.waiting_message_text)
-async def edit_survey_message_save(message: Message, state: FSMContext, session: AsyncSession):
+@router.message(CreateSurvey.waiting_message_text)
+async def create_survey_message(message: Message, state: FSMContext, session: AsyncSession):
     data = await state.get_data()
-    survey_id = data['survey_id']
-    
-    result = await session.execute(
-        select(Survey).where(Survey.survey_id == survey_id)
+
+    new_survey = Survey(
+        name=data["name"],
+        button_text=data["button_text"],
+        message_text=message.text,
+        is_active=True
     )
-    survey = result.scalar_one_or_none()
-    
-    if not survey:
-        await message.answer("❌ Анкета не найдена")
-        await state.clear()
-        return
-    
-    survey.message_text = message.text
+    session.add(new_survey)
     await session.commit()
-    
+    await session.refresh(new_survey)
+
+    await state.update_data(survey_id=new_survey.survey_id)
+
+    # NEW: tgtrack target step
+    await state.set_state(CreateSurvey.waiting_tgtrack_target)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Пропустить", callback_data="survey:tgtrack:skip")]
+        ]
+    )
     await message.answer(
-        f"✅ <b>Текст сообщения успешно изменен!</b>\n\n"
-        f"💬 Новый текст:\n{message.text}",
-        reply_markup=get_admin_main_keyboard(),
+        "🎯 <b>TGTrack цель (необязательно)</b>\n\n"
+        "Введите название цели, которую нужно отправить в TGTrack после завершения анкеты.\n"
+        "Например: <code>lead_survey_english</code>\n\n"
+        "Если не нужно — нажмите «Пропустить».",
+        reply_markup=kb,
         parse_mode="HTML"
     )
-    await state.clear()
 
+@router.callback_query(F.data == "survey:tgtrack:skip")
+async def skip_tgtrack_target(callback: CallbackQuery, state: FSMContext):
+    # target bo'sh qoladi
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await state.set_state(CreateSurvey.waiting_intro_photo)
+    # intro photo promptni qayta yuboring (sizdagi mavjud kod)
+    await callback.message.answer(
+        "🖼 <b>ИНТРО-ФОТО (необязательно)</b>\n\n"
+        "Если хотите картинку при открытии анкеты — отправьте фото.\n\n"
+        "Если не нужно — нажмите «Пропустить».",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="⏭ Пропустить", callback_data="survey:intro_photo:skip")]]
+        ),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.message(CreateSurvey.waiting_tgtrack_target)
+async def save_tgtrack_target(message: Message, state: FSMContext, session: AsyncSession):
+    data = await state.get_data()
+    survey_id = data.get("survey_id")
+    if not survey_id:
+        await message.answer("❌ Ошибка: анкета не найдена", parse_mode="HTML")
+        await state.clear()
+        return
+
+    target = (message.text or "").strip()
+
+    result = await session.execute(select(Survey).where(Survey.survey_id == survey_id))
+    survey = result.scalar_one_or_none()
+    if not survey:
+        await message.answer("❌ Анкета не найдена", parse_mode="HTML")
+        await state.clear()
+        return
+
+    survey.tgtrack_target = target[:100] if target else None
+    await session.commit()
+
+    # keyingi bosqich: intro photo
+    await state.set_state(CreateSurvey.waiting_intro_photo)
+    await message.answer(
+        "✅ TGTrack цель сохранена.\n\n"
+        "🖼 Теперь отправьте интро-фото или нажмите «Пропустить».",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="⏭ Пропустить", callback_data="survey:intro_photo:skip")]]
+        ),
+        parse_mode="HTML"
+    )
 
 @router.callback_query(F.data.startswith("survey:edit_completion:"))
 async def edit_survey_completion_start(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
@@ -1135,6 +1240,28 @@ async def edit_survey_completion_start(callback: CallbackQuery, state: FSMContex
     )
     await callback.answer()
 
+@router.message(EditSurvey.waiting_tgtrack_target)
+async def edit_survey_tgtrack_save(message: Message, state: FSMContext, session: AsyncSession):
+    data = await state.get_data()
+    survey_id = data["survey_id"]
+
+    result = await session.execute(select(Survey).where(Survey.survey_id == survey_id))
+    survey = result.scalar_one_or_none()
+    if not survey:
+        await message.answer("❌ Анкета не найдена")
+        await state.clear()
+        return
+
+    target = (message.text or "").strip()
+    survey.tgtrack_target = target[:100] if target else None
+    await session.commit()
+
+    await message.answer(
+        f"✅ TGTrack цель обновлена: <code>{survey.tgtrack_target or '—'}</code>",
+        reply_markup=get_admin_main_keyboard(),
+        parse_mode="HTML"
+    )
+    await state.clear()
 
 @router.message(EditSurvey.waiting_completion_message)
 async def edit_survey_completion_save(message: Message, state: FSMContext, session: AsyncSession):
@@ -1800,10 +1927,14 @@ async def process_survey_answer(message: Message, state: FSMContext, session: As
             response.completed_at = datetime.now()
             await session.commit()
         
+        tg_target = None
+        if survey and survey.tgtrack_target:
+            tg_target = survey.tgtrack_target.strip() or None
+
         try:
             await TgTrackService.send_goal(
                 user_id=message.from_user.id,
-                target="success_survey"
+                target=tg_target or "success_survey"   # fallback
             )
         except Exception as e:
             logging.exception("TGTrack send_goal failed: %s", e)
